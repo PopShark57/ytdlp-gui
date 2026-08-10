@@ -2,8 +2,16 @@
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
 
+## Build products
+build/
+DerivedData/
+*.xcarchive
+
 ## User settings
 xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
 
 ## Obj-C/Swift specific
 *.hmap
@@ -61,4 +69,13 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
 ClaudeReadThis.md
+
+# Generated icon byproduct — rebuild with ./Tools/generate-app-icon.sh
+# (the asset catalogue PNGs are tracked; the app never uses this file)
+Icon/AppIcon.icns

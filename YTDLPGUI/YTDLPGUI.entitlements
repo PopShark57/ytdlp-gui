@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  The App Sandbox is intentionally disabled.
+
+	  YTDLP GUI's entire purpose is to launch an independently installed `yt-dlp`
+	  executable (typically from /opt/homebrew/bin) and write files to a folder the
+	  user chooses. A sandboxed process may not execute arbitrary binaries outside
+	  its container, so sandboxing would break the app's core function.
+
+	  This app is distributed outside the Mac App Store. The Hardened Runtime is
+	  enabled for Release builds so the app can still be notarized.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>
