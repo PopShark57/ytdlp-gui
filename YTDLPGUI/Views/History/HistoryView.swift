@@ -162,21 +162,42 @@ struct HistoryView: View {
 
     // MARK: - Actions
 
-    /// Re-queues the entry using the exact options it was originally downloaded with.
+    /// Re-queues the entry using the exact options it was originally downloaded with,
+    /// after stripping any denied custom arguments so history cannot replay `--exec`.
     private func downloadAgain(_ entry: HistoryEntry) {
         var options = entry.options ?? model.composer.options
+        let inspection = CustomArgumentPolicy.inspect(options.customArguments)
+        if inspection.isBlocked {
+            options.customArguments = CustomArgumentPolicy.sanitizedArgumentString(options.customArguments)
+        }
         // The original folder may be gone; fall back to the current default.
         if !FileManager.default.fileExists(atPath: options.outputDirectory.path(percentEncoded: false)) {
             options.outputDirectory = model.settings.downloadDirectory
         }
         model.queue.enqueue(url: entry.sourceURL, options: options)
         model.selectedSection = .queue
+        if inspection.isBlocked {
+            let listed = inspection.blockedFlags.map { "‘\($0)’" }.joined(separator: ", ")
+            model.composer.showStatus(
+                "Removed dangerous custom option\(inspection.blockedFlags.count == 1 ? "" : "s") before re-download: \(listed)."
+            )
+        }
     }
 
     private func loadIntoComposer(_ entry: HistoryEntry) {
-        if let options = entry.options {
+        if var options = entry.options {
+            let inspection = CustomArgumentPolicy.inspect(options.customArguments)
+            if inspection.isBlocked {
+                options.customArguments = CustomArgumentPolicy.sanitizedArgumentString(options.customArguments)
+            }
             model.composer.options = options
             model.composer.options.outputDirectory = model.settings.downloadDirectory
+            if inspection.isBlocked {
+                let listed = inspection.blockedFlags.map { "‘\($0)’" }.joined(separator: ", ")
+                model.composer.showStatus(
+                    "Stripped dangerous custom option\(inspection.blockedFlags.count == 1 ? "" : "s") from history: \(listed)."
+                )
+            }
         }
         model.composer.setURLText(entry.sourceURL, analyzeIfEnabled: false)
         model.selectedSection = .download

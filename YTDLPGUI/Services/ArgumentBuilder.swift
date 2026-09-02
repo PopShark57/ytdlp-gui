@@ -143,8 +143,9 @@ enum ArgumentBuilder {
         }
 
         // --- Escape hatch -------------------------------------------------------------------
-        // Appended last so a power user can override anything above.
-        arguments += ShellQuoting.split(options.customArguments)
+        // Appended last so a power user can override anything above — but never with
+        // command-exec / arbitrary-config flags (see CustomArgumentPolicy).
+        arguments += CustomArgumentPolicy.safeArguments(from: options.customArguments)
 
         // `--` guarantees a URL beginning with a dash is treated as a URL and never as a flag.
         arguments += ["--", url]
@@ -233,7 +234,7 @@ enum ArgumentBuilder {
         if !userAgent.isEmpty {
             arguments += ["--user-agent", userAgent]
         }
-        arguments += ShellQuoting.split(options.customArguments)
+        arguments += CustomArgumentPolicy.safeArguments(from: options.customArguments)
         arguments += ["--", url]
         return arguments
     }

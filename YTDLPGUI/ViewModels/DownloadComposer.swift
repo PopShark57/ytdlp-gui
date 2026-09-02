@@ -62,12 +62,19 @@ final class DownloadComposer {
 
     var isMultipleURLs: Bool { detectedURLs.count > 1 }
 
+    /// Error when Custom Arguments contain denied flags such as `--exec`.
+    var customArgumentBlockMessage: String? {
+        CustomArgumentPolicy.validationMessage(for: options.customArguments)
+    }
+
+    var hasBlockedCustomArguments: Bool { customArgumentBlockMessage != nil }
+
     var canAnalyze: Bool {
-        toolchain.isReady && detectedURLs.count == 1 && !analysis.isAnalyzing
+        toolchain.isReady && detectedURLs.count == 1 && !analysis.isAnalyzing && !hasBlockedCustomArguments
     }
 
     var canDownload: Bool {
-        toolchain.isReady && hasValidURL
+        toolchain.isReady && hasValidURL && !hasBlockedCustomArguments
     }
 
     /// The exact command that will run, for the preview panel.
@@ -82,6 +89,9 @@ final class DownloadComposer {
     /// Warnings worth surfacing before the user presses Download.
     var advisories: [String] {
         var messages: [String] = []
+        if let block = customArgumentBlockMessage {
+            messages.append(block)
+        }
         if !toolchain.canMergeStreams {
             switch options.kind {
             case .video:
@@ -149,6 +159,10 @@ final class DownloadComposer {
     /// Fetches metadata for the current URL.
     func analyze() {
         guard let url = detectedURLs.first, toolchain.isReady else { return }
+        if let block = customArgumentBlockMessage {
+            showStatus(block)
+            return
+        }
         analysisTask?.cancel()
         analysis = .analyzing
         analyzedURL = url
@@ -192,7 +206,12 @@ final class DownloadComposer {
     /// Queues the current URL (or all of them, when several were pasted).
     @discardableResult
     func startDownload() -> Bool {
-        guard canDownload else { return false }
+        guard canDownload else {
+            if let block = customArgumentBlockMessage {
+                showStatus(block)
+            }
+            return false
+        }
         let urls = detectedURLs
         options.outputDirectory = options.outputDirectory.standardizedFileURL
 
@@ -235,7 +254,7 @@ final class DownloadComposer {
 
     // MARK: - Status banner
 
-    private func showStatus(_ message: String) {
+    func showStatus(_ message: String) {
         statusMessage = message
         statusMessageTask?.cancel()
         statusMessageTask = Task { [weak self] in
