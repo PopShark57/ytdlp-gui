@@ -322,18 +322,35 @@ struct AdvancedOptionsCard: View {
             .font(.system(.callout, design: .monospaced))
             .lineLimit(1...4)
 
-            Text("Appended after everything above, so they win any conflict. Quoted strings are honoured, but nothing is passed through a shell — no globbing, no variable expansion, no command substitution.")
+            Text("Appended after everything above, so they win any conflict. Quoted strings are honoured, but nothing is passed through a shell — no globbing, no variable expansion, no command substitution. Options that run commands (`--exec`) or load arbitrary config/plugins are blocked.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if !composer.options.customArguments.isEmpty {
-                let parsed = ShellQuoting.split(composer.options.customArguments)
-                Text("Parsed as \(parsed.count) argument\(parsed.count == 1 ? "" : "s"): \(parsed.map { "“\($0)”" }.joined(separator: ", "))")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
+            if let blockMessage = CustomArgumentPolicy.validationMessage(for: composer.options.customArguments) {
+                Label(blockMessage, systemImage: "exclamationmark.shield.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                    .accessibilityLabel(blockMessage)
+            }
+
+            if !composer.options.customArguments.isEmpty {
+                let inspection = CustomArgumentPolicy.inspect(composer.options.customArguments)
+                let parsed = inspection.safeArguments
+                if inspection.isBlocked {
+                    Text("After removing blocked options: \(parsed.isEmpty ? "(nothing left)" : parsed.map { "“\($0)”" }.joined(separator: ", "))")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else {
+                    Text("Parsed as \(parsed.count) argument\(parsed.count == 1 ? "" : "s"): \(parsed.map { "“\($0)”" }.joined(separator: ", "))")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
             }
         }
     }
