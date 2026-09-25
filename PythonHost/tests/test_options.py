@@ -184,5 +184,81 @@ class PlumbingTests(unittest.TestCase):
             self.assertFalse(self.plumbed(['--hls-prefer-ffmpeg'])['hls_prefer_native'])
 
 
+class CookieFileTests(unittest.TestCase):
+    """Each job works on its own copy of --cookies, so concurrent jobs can't corrupt it."""
+
+    COOKIES = (
+        '# Netscape HTTP Cookie File\n'
+        '\n'
+        '.example.com\tTRUE\t/\tTRUE\t0\tsession\tabc123\n'
+    )
+
+    def setUp(self):
+        self.path = os.path.join(support.scratch_dir(), f'{support.new_job_id()}-cookies.txt')
+        with open(self.path, 'w', encoding='utf-8') as file:
+            file.write(self.COOKIES)
+
+    def plumbed(self, path):
+        return options.engine_params(
+            options.parse(['--cookies', path, '--', URL]), logger=None, progress_hook=print,
+            postprocessor_hook=print, cache_dir=None, for_analysis=False)
+
+    def contents(self):
+        with open(self.path, encoding='utf-8') as file:
+            return file.read()
+
+    def test_the_file_is_read_up_front_and_never_written(self):
+        params = self.plumbed(self.path)
+        self.assertNotEqual(params['cookiefile'], self.path)
+        with _youtube_dl(params) as ydl:
+            [cookie] = list(ydl.cookiejar)
+            self.assertEqual((cookie.domain, cookie.name, cookie.value), ('.example.com', 'session', 'abc123'))
+            ydl.cookiejar.set_cookie(_cookie('added', 'by-this-job'))
+        # yt-dlp saves the jar when it closes; the imported file must be untouched.
+        self.assertEqual(self.contents(), self.COOKIES)
+
+    def test_jobs_do_not_share_a_copy(self):
+        first, second = self.plumbed(self.path), self.plumbed(self.path)
+        self.assertIsNot(first['cookiefile'], second['cookiefile'])
+        with _youtube_dl(first) as ydl:
+            ydl.cookiejar.set_cookie(_cookie('added', 'by-the-first-job'))
+        with _youtube_dl(second) as ydl:
+            self.assertEqual([cookie.name for cookie in ydl.cookiejar], ['session'])
+
+    def test_a_missing_file_means_no_cookies(self):
+        missing = self.path + '.missing'
+        params = self.plumbed(missing)
+        self.assertIsNone(params['cookiefile'])
+        with _youtube_dl(params) as ydl:
+            self.assertEqual(list(ydl.cookiejar), [])
+        self.assertFalse(os.path.exists(missing))
+
+    def test_an_unreadable_file_is_left_for_yt_dlp_to_report(self):
+        directory = support.scratch_dir()
+        self.assertEqual(self.plumbed(directory)['cookiefile'], directory)
+
+    def test_no_cookies(self):
+        params = options.engine_params(
+            options.parse(['--', URL]), logger=None, progress_hook=print, postprocessor_hook=print,
+            cache_dir=None, for_analysis=False)
+        self.assertIsNone(params.get('cookiefile'))
+
+
+def _youtube_dl(params):
+    from yt_dlp import YoutubeDL
+
+    return YoutubeDL({**params, 'quiet': True, 'no_warnings': True})
+
+
+def _cookie(name, value):
+    import http.cookiejar
+
+    return http.cookiejar.Cookie(
+        version=0, name=name, value=value, port=None, port_specified=False,
+        domain='.example.com', domain_specified=True, domain_initial_dot=True, path='/',
+        path_specified=True, secure=True, expires=None, discard=False, comment=None,
+        comment_url=None, rest={})
+
+
 if __name__ == '__main__':
     unittest.main()

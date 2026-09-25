@@ -1,7 +1,8 @@
 # Continuation notes — iOS app for YTDLP GUI
 
-Handoff for the next session. Written 2026-09-24. Everything described here is **uncommitted** on the
-branch `feat/ios-app`. The user has not asked for a commit yet, so don't commit or push unless asked.
+Handoff for the next session. Written 2026-09-24, updated 2026-09-25. The iOS app was merged in
+PR #3 (`feat/ios-app`). The follow-up work in "Done on 2026-09-25" below is on the branch
+`claude/magical-dirac-95o34m`.
 
 ## What exists
 
@@ -102,31 +103,36 @@ xcrun --sdk iphonesimulator swiftc -typecheck -target arm64-apple-ios18.0-simula
 - **"Site" row:** shows the page's domain instead of yt-dlp's extractor key.
 - **UI test target:** added (`YTDLPGUI-iOSUITests`), plus `accessibilityIdentifier("startDownloadButton")`.
 
+## Done on 2026-09-25 (cloud session, Linux: no Xcode or device)
+
+- **README.md** has an iOS section: requirements, the fetch script, signing and the free-team
+  App Group caveat, sideload-only distribution (App Review Guideline 5.2.3), the differences from
+  macOS, the Files location, the Share extension, Shortcuts and the URL scheme, cookies, updating
+  yt-dlp, background downloads and tests. Also: a combined architecture tree, the iOS icon and
+  `AccentColor` outputs of the icon generator, the bundled components' licences, and a corrected
+  affiliation note (the iOS app *does* bundle yt-dlp).
+- **`Docs/iOS-Architecture.md`**: the video selector now matches
+  `ArgumentBuilder.embeddedVideoFormatSelector`; `FixupM4aPP` is in the post-processor table; the
+  cookie handling and the UI-test target are described.
+- **Cookie-file race, fixed in the Python host** (`options.engine_params` →
+  `_private_cookie_copy`). Each job reads the `--cookies` file when it starts and hands yt-dlp an
+  `io.StringIO` copy, which `cookiefile` accepts. yt-dlp's save-on-close then only rewrites that
+  job's copy, so the imported file is never written. A missing file becomes "no cookies"
+  (`None`). An unreadable one is left as a path, so yt-dlp reports the error itself. Five new
+  tests are in `PythonHost/tests/test_options.py` (`CookieFileTests`); three of them fail
+  without the fix.
+  - Deliberate consequence: cookies that a site refreshes during a download aren't persisted.
+    The imported file stays exactly as imported, which also keeps the Cookies screen's
+    summary (count and domains) true.
+- Python host suite: **134 pass**, 1 skipped (live). This was run with Python 3.14.0rc2 from
+  `uv` and ffmpeg from apt, against the pinned wheels.
+
 ## Remaining work (suggested order)
 
-1. **README.md** needs an iOS section. The current README is macOS-only, and it says the app
-   "neither bundles nor redistributes" yt-dlp, which is no longer true for iOS. Cover:
-   - requirements: iOS 18+;
-   - running the fetch script;
-   - signing, including the free-team App Group caveat;
-   - sideload-only distribution: the App Store rejects downloaders;
-   - the differences from macOS: MP4 video only; M4A/ALAC/FLAC/WAV audio (no MP3 or Opus);
-     subtitles saved as separate files; a `cookies.txt` import instead of browser cookies;
-   - the Files app location;
-   - the Share extension and Shortcuts;
-   - updating yt-dlp from Settings;
-   - an updated architecture tree;
-   - the licences of the bundled components.
-
-   Also update "The application icon": the generator now also writes the iOS icon (light, dark and
-   tinted) and the `AccentColor`.
-2. **`Docs/iOS-Architecture.md`**: the video selector example is outdated. The shipped selector, in
-   `Shared/Services/ArgumentBuilder+Embedded.swift`, uses `+(ba[ext=m4a]/ba[acodec^=mp4a])` and ends
-   `/b[ext=mp4]/b/bv*+ba`. Mention `FixupM4aPP` in the post-processor table.
-3. **Cookie-file race** (flagged by the shared-core work): yt-dlp rewrites the `--cookies` file when
-   each job closes, so concurrent jobs can read a half-written file. Give each job its own copy of
-   the imported `cookies.txt`, e.g. in `DownloadOptionsResolver` or the host.
-4. **Not yet exercised on the device:**
+1. **Rebuild and run the iOS tests on the iPhone.** No Swift changed in this session, so nothing
+   should break. But the Python host changed and is bundled into the app. The live YouTube tests
+   run with cookies only if some are imported.
+2. **Not yet exercised on the device:**
    - the Share extension UI;
    - BGContinuedProcessingTask background continuation (iOS 26+);
    - Save to Photos;
@@ -136,10 +142,21 @@ xcrun --sdk iphonesimulator swiftc -typecheck -target arm64-apple-ios18.0-simula
    - light mode.
 
    The UI test only covers dark mode on iPhone.
-5. **A cosmetic AVFoundation log** during metadata embedding: "FigUserDataSerializerAddItem … Value
-   has invalid iso data type". Probably a metadata item without a valid language/data type in
-   `YTDLPGUI-iOS/Engine/Media/MetadataTags.swift`. It isn't fatal; the downloads succeed.
-6. A Release-configuration device build hasn't been tried; only Debug has.
+3. **A cosmetic AVFoundation log** during metadata embedding: "FigUserDataSerializerAddItem …
+   Value has invalid iso data type". It's harmless: the downloads succeed. It wasn't changed
+   this session, because pinning down the offending item needs AVFoundation, which Linux
+   doesn't have, and a web search found nothing on the message. "FigUserData" is Core Media's
+   `udta` user-data writer. "iso" most likely means the ISO/3GPP user-data key space that
+   `AVAssetWriter` derives from the iTunes tags (see the comment on `MetadataTags.merged`).
+   - **Suspects, in order:**
+     1. `.iTunesMetadataReleaseDate` written as a UTF-8 "YYYY-MM-DD" string. Its 3GPP
+        counterpart, `yrrc`, is a 16-bit year.
+     2. The `trkn` item written as raw data.
+     3. An item carried over from the source file.
+   - **To find it:** in a device test that calls `MetadataEmbedder.embed`, embed one tag at a
+     time and watch the console. Then fix that item's data type, or drop its derived copy, in
+     `YTDLPGUI-iOS/Engine/Media/MetadataTags.swift`.
+4. A Release-configuration device build hasn't been tried; only Debug has.
 
 ## Other sessions and tasks
 
