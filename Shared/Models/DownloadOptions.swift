@@ -108,6 +108,7 @@ enum AudioFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     case best
     case mp3
     case m4a
+    case alac
     case flac
     case wav
     case opus
@@ -119,6 +120,7 @@ enum AudioFormat: String, Codable, CaseIterable, Identifiable, Sendable {
         case .best: "Best Audio"
         case .mp3: "MP3"
         case .m4a: "M4A · AAC"
+        case .alac: "ALAC"
         case .flac: "FLAC"
         case .wav: "WAV"
         case .opus: "Opus"
@@ -132,7 +134,7 @@ enum AudioFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     var supportsQuality: Bool {
         switch self {
         case .mp3, .m4a, .opus: true
-        case .best, .flac, .wav: false
+        case .best, .alac, .flac, .wav: false
         }
     }
 
@@ -141,6 +143,7 @@ enum AudioFormat: String, Codable, CaseIterable, Identifiable, Sendable {
         case .best: "Keep the original audio stream without re-encoding. Fastest and lossless."
         case .mp3: "Universally compatible lossy audio."
         case .m4a: "AAC in an MP4 container. Native to Apple Music and iOS."
+        case .alac: "Apple Lossless in an M4A file. No quality loss, and plays everywhere Apple Music does."
         case .flac: "Lossless compression. Larger files, no quality loss from the source."
         case .wav: "Uncompressed PCM. Very large files."
         case .opus: "Modern lossy codec with excellent quality at low bitrates."
@@ -336,6 +339,8 @@ struct DownloadOptions: Codable, Equatable, Sendable {
 
     // Network & authentication
     var cookieBrowser: CookieBrowser = .none
+    /// A Netscape-format cookies file passed with `--cookies`. Empty means none.
+    var cookieFilePath: String = ""
     var rateLimit: String = ""
     var concurrentFragments: Int = 1
     var proxy: String = ""
@@ -355,8 +360,14 @@ struct DownloadOptions: Codable, Equatable, Sendable {
     static let defaultOutputTemplate = "%(title)s.%(ext)s"
 
     static var defaultDownloadsDirectory: URL {
+        #if os(iOS)
+        // The Documents folder is what the Files app shows under "On My iPhone › YTDLP GUI".
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appending(path: "Documents")
+        #else
         FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appending(path: "Downloads")
+        #endif
     }
 
     /// A one-line description of the chosen preset, for queue rows and history.
@@ -371,5 +382,71 @@ struct DownloadOptions: Codable, Equatable, Sendable {
                 : ""
             return "\(audioFormat.displayName)\(quality)"
         }
+    }
+}
+
+// MARK: - Lenient decoding
+
+extension DownloadOptions {
+
+    /// Decodes whatever is present and falls back to the default for everything else.
+    ///
+    /// Options are persisted twice — as the last-used set and inside every history entry — so
+    /// the stored JSON is always from some older build. Synthesised decoding would reject it the
+    /// moment a field is added, and a rejected history entry takes the whole history file with
+    /// it. Each field is therefore optional on the way in, and an unrecognised enum value (from a
+    /// newer build, or the other platform) falls back to the default instead of failing.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        var options = DownloadOptions()
+
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            (try? container.decodeIfPresent(T.self, forKey: key)) ?? fallback
+        }
+
+        options.kind = value(.kind, options.kind)
+        options.videoQuality = value(.videoQuality, options.videoQuality)
+        options.container = value(.container, options.container)
+        options.audioFormat = value(.audioFormat, options.audioFormat)
+        options.audioQuality = value(.audioQuality, options.audioQuality)
+        options.outputDirectory = value(.outputDirectory, options.outputDirectory)
+        options.outputTemplate = value(.outputTemplate, options.outputTemplate)
+
+        options.subtitleMode = value(.subtitleMode, options.subtitleMode)
+        options.subtitleLanguages = value(.subtitleLanguages, options.subtitleLanguages)
+        options.embedSubtitles = value(.embedSubtitles, options.embedSubtitles)
+
+        options.embedThumbnail = value(.embedThumbnail, options.embedThumbnail)
+        options.embedMetadata = value(.embedMetadata, options.embedMetadata)
+        options.embedChapters = value(.embedChapters, options.embedChapters)
+        options.writeThumbnail = value(.writeThumbnail, options.writeThumbnail)
+        options.writeInfoJSON = value(.writeInfoJSON, options.writeInfoJSON)
+
+        options.sponsorBlockMode = value(.sponsorBlockMode, options.sponsorBlockMode)
+        // Decoded element by element so one unknown category doesn't discard the others.
+        if let rawCategories = try? container.decodeIfPresent([String].self, forKey: .sponsorBlockCategories) {
+            options.sponsorBlockCategories = Set(rawCategories.compactMap(SponsorBlockCategory.init(rawValue:)))
+        }
+
+        options.downloadPlaylist = value(.downloadPlaylist, options.downloadPlaylist)
+        options.playlistItems = value(.playlistItems, options.playlistItems)
+
+        options.useDownloadArchive = value(.useDownloadArchive, options.useDownloadArchive)
+        options.downloadArchivePath = value(.downloadArchivePath, options.downloadArchivePath)
+
+        options.cookieBrowser = value(.cookieBrowser, options.cookieBrowser)
+        options.cookieFilePath = value(.cookieFilePath, options.cookieFilePath)
+        options.rateLimit = value(.rateLimit, options.rateLimit)
+        options.concurrentFragments = value(.concurrentFragments, options.concurrentFragments)
+        options.proxy = value(.proxy, options.proxy)
+        options.userAgent = value(.userAgent, options.userAgent)
+
+        options.restrictFilenames = value(.restrictFilenames, options.restrictFilenames)
+        options.overwriteExisting = value(.overwriteExisting, options.overwriteExisting)
+
+        options.customArguments = value(.customArguments, options.customArguments)
+        options.ignoreUserConfig = value(.ignoreUserConfig, options.ignoreUserConfig)
+
+        self = options
     }
 }

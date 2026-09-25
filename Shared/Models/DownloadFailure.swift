@@ -53,6 +53,9 @@ struct DownloadFailure: Equatable, Sendable {
     }
 
     var recoverySuggestion: String? {
+        #if os(iOS)
+        return embeddedEngineRecoverySuggestion
+        #else
         switch kind {
         case .toolMissing(let name):
             "Install it with `brew install \(name)`, or choose the executable manually in Settings."
@@ -89,6 +92,7 @@ struct DownloadFailure: Equatable, Sendable {
         case .unknown:
             "Open the log for the full output from yt-dlp."
         }
+        #endif
     }
 
     var symbolName: String {
@@ -197,3 +201,60 @@ struct DownloadFailure: Equatable, Sendable {
         return line.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+
+#if os(iOS)
+extension DownloadFailure {
+
+    /// Advice for the iOS app, which has no Homebrew, Terminal, Finder or ffmpeg, signs in with
+    /// an imported cookies file rather than a browser's, and updates yt-dlp from its own settings.
+    fileprivate var embeddedEngineRecoverySuggestion: String? {
+        switch kind {
+        case .toolMissing(let name) where name.lowercased().hasPrefix("ff"):
+            Self.ffmpegUnavailableAdvice
+        case .toolMissing:
+            "The download engine built into the app couldn't start. Quit and reopen the app. If you "
+                + "installed a yt-dlp update, Settings › Engine › Use Bundled Version goes back to the "
+                + "version that came with the app."
+        case .invalidURL:
+            "Check the address and try again. It should start with http:// or https://."
+        case .unsupportedSite:
+            "yt-dlp has no extractor for this site. Updating yt-dlp in Settings › Engine › Check for "
+                + "Updates sometimes adds support."
+        case .unavailable:
+            "The video may have been removed, made private, or never existed."
+        case .privateOrMembersOnly:
+            "If your account can watch it, sign in to the site in a browser and import its cookies.txt "
+                + "file in Settings › Cookies."
+        case .geoRestricted:
+            "A proxy set in Advanced Options may help."
+        case .ageRestricted, .authenticationRequired:
+            "Sign in to the site in a browser, then import a cookies.txt file in Settings › Cookies."
+        case .botCheck:
+            "Import a cookies.txt file in Settings › Cookies. Updating yt-dlp in Settings › Engine › "
+                + "Check for Updates also helps, because these checks change often."
+        case .rateLimited:
+            "Wait a few minutes before retrying, or set a rate limit in Advanced Options."
+        case .network:
+            "Check your internet connection and try again."
+        case .postProcessing:
+            "The downloaded file couldn't be processed on this device. Try again with metadata and "
+                + "artwork embedding turned off in Advanced Options, or choose M4A for audio."
+        case .ffmpegMissing:
+            Self.ffmpegUnavailableAdvice
+        case .fileSystem:
+            "Check that the filename template in Advanced Options stays inside the app's folder, "
+                + "then try again."
+        case .diskFull:
+            "Free up space on this device, or clear partial downloads in Settings › Storage."
+        case .cancelled:
+            nil
+        case .unknown:
+            "Open the log for the full output from yt-dlp."
+        }
+    }
+
+    private static let ffmpegUnavailableAdvice =
+        "The requested processing needs ffmpeg, which iPhone and iPad don't have. Download MP4 video "
+            + "or M4A audio instead, which the app can process on its own."
+}
+#endif

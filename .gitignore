@@ -79,3 +79,11 @@ ClaudeReadThis.md
 # Generated icon byproduct — rebuild with ./Tools/generate-app-icon.sh
 # (the asset catalogue PNGs are tracked; the app never uses this file)
 Icon/AppIcon.icns
+
+# Embedded Python runtime and packages for the iOS target.
+# Fetched and checksum-verified by ./Tools/fetch-ios-dependencies.sh; never committed.
+Vendor/
+
+# Python byte code from running the engine host's tests on the Mac
+__pycache__/
+*.pyc
