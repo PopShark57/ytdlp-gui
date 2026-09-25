@@ -56,99 +56,35 @@ enum ArgumentBuilder {
         arguments += ["--progress", "--progress-template", downloadProgressTemplate]
         arguments += ["--progress-template", postProcessTemplate]
 
-        if options.ignoreUserConfig {
-            arguments.append("--ignore-config")
-        }
+        arguments += configurationArguments(for: options)
 
         // --- Destination -------------------------------------------------------------
-        arguments += ["--paths", options.outputDirectory.path(percentEncoded: false)]
-        let template = options.outputTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-        arguments += ["--output", template.isEmpty ? DownloadOptions.defaultOutputTemplate : template]
-
-        if options.restrictFilenames { arguments.append("--restrict-filenames") }
-        arguments.append(options.overwriteExisting ? "--force-overwrites" : "--no-overwrites")
+        arguments += outputDirectoryArguments(for: options)
+        arguments += fileNamingArguments(for: options)
 
         if let ffmpegURL {
             arguments += ["--ffmpeg-location", ffmpegURL.path(percentEncoded: false)]
         }
 
-        // --- Format ------------------------------------------------------------------
         arguments += formatArguments(for: options)
-
-        // --- Playlists ---------------------------------------------------------------
-        arguments.append(options.downloadPlaylist ? "--yes-playlist" : "--no-playlist")
-        let items = options.playlistItems.trimmingCharacters(in: .whitespacesAndNewlines)
-        if options.downloadPlaylist, !items.isEmpty {
-            arguments += ["--playlist-items", items]
-        }
-
-        // --- Subtitles ---------------------------------------------------------------
-        if options.subtitleMode.isEnabled {
-            if options.subtitleMode.writesManual { arguments.append("--write-subs") }
-            if options.subtitleMode.writesAutomatic { arguments.append("--write-auto-subs") }
-            let languages = options.subtitleLanguages.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !languages.isEmpty {
-                arguments += ["--sub-langs", languages]
-            }
-            // Embedding only makes sense for a container that can carry a subtitle track.
-            if options.embedSubtitles, options.kind == .video {
-                arguments.append("--embed-subs")
-            }
-        }
-
-        // --- Metadata and artwork ------------------------------------------------------
-        if options.embedThumbnail { arguments.append("--embed-thumbnail") }
-        if options.embedMetadata { arguments.append("--embed-metadata") }
-        if options.embedChapters { arguments.append("--embed-chapters") }
-        if options.writeThumbnail { arguments.append("--write-thumbnail") }
-        if options.writeInfoJSON { arguments.append("--write-info-json") }
-
-        // --- SponsorBlock ---------------------------------------------------------------
-        if options.sponsorBlockMode != .off, !options.sponsorBlockCategories.isEmpty {
-            let categories = options.sponsorBlockCategories
-                .map(\.rawValue)
-                .sorted()
-                .joined(separator: ",")
-            switch options.sponsorBlockMode {
-            case .mark: arguments += ["--sponsorblock-mark", categories]
-            case .remove: arguments += ["--sponsorblock-remove", categories]
-            case .off: break
-            }
-        }
-
-        // --- Archive ---------------------------------------------------------------------
-        let archivePath = options.downloadArchivePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if options.useDownloadArchive, !archivePath.isEmpty {
-            arguments += ["--download-archive", archivePath]
-        }
+        arguments += playlistArguments(for: options)
+        arguments += subtitleArguments(for: options, allowsEmbedding: true)
+        arguments += artworkAndMetadataArguments(for: options)
+        arguments += sponsorBlockArguments(for: options)
+        arguments += archiveArguments(for: options)
 
         // --- Network and authentication ----------------------------------------------------
-        if let browser = options.cookieBrowser.ytdlpValue {
-            arguments += ["--cookies-from-browser", browser]
-        }
-        let rateLimit = options.rateLimit.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !rateLimit.isEmpty {
-            arguments += ["--limit-rate", rateLimit]
-        }
-        if options.concurrentFragments > 1 {
-            arguments += ["--concurrent-fragments", String(options.concurrentFragments)]
-        }
-        let proxy = options.proxy.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !proxy.isEmpty {
-            arguments += ["--proxy", proxy]
-        }
-        let userAgent = options.userAgent.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !userAgent.isEmpty {
-            arguments += ["--user-agent", userAgent]
-        }
+        arguments += browserCookieArguments(for: options)
+        arguments += cookieFileArguments(for: options)
+        arguments += transferArguments(for: options)
+        arguments += connectionArguments(for: options)
 
         // --- Escape hatch -------------------------------------------------------------------
         // Appended last so a power user can override anything above — but never with
         // command-exec / arbitrary-config flags (see CustomArgumentPolicy).
-        arguments += CustomArgumentPolicy.safeArguments(from: options.customArguments)
+        arguments += CustomArgumentPolicy.safeArguments(from: options.customArguments, context: .externalProcess)
 
-        // `--` guarantees a URL beginning with a dash is treated as a URL and never as a flag.
-        arguments += ["--", url]
+        arguments += endOfOptions(url: url)
         return arguments
     }
 
@@ -218,14 +154,134 @@ enum ArgumentBuilder {
             "--color", "never",
             "--flat-playlist",
         ]
-        if options.ignoreUserConfig {
-            arguments.append("--ignore-config")
-        }
-        arguments.append(options.downloadPlaylist ? "--yes-playlist" : "--no-playlist")
+        arguments += configurationArguments(for: options)
+        arguments.append(playlistModeArgument(for: options))
+        arguments += browserCookieArguments(for: options)
+        arguments += cookieFileArguments(for: options)
+        arguments += connectionArguments(for: options)
+        arguments += CustomArgumentPolicy.safeArguments(from: options.customArguments, context: .externalProcess)
+        arguments += endOfOptions(url: url)
+        return arguments
+    }
 
-        if let browser = options.cookieBrowser.ytdlpValue {
-            arguments += ["--cookies-from-browser", browser]
+    // MARK: - Sections
+
+    // The builders are assembled from these, so the desktop and embedded engines can differ only
+    // where they genuinely must and can never drift apart anywhere else.
+
+    /// `--ignore-config`, so a user's `yt-dlp.conf` can't silently change what the preview shows.
+    static func configurationArguments(for options: DownloadOptions) -> [String] {
+        options.ignoreUserConfig ? ["--ignore-config"] : []
+    }
+
+    /// The folder files are saved into. The template is passed separately (`--output`), so a
+    /// folder name containing `%` is never interpreted as a template field.
+    static func outputDirectoryArguments(for options: DownloadOptions) -> [String] {
+        ["--paths", options.outputDirectory.path(percentEncoded: false)]
+    }
+
+    /// The output template, filename restrictions and the overwrite policy.
+    static func fileNamingArguments(for options: DownloadOptions) -> [String] {
+        let template = options.outputTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        var arguments = ["--output", template.isEmpty ? DownloadOptions.defaultOutputTemplate : template]
+        if options.restrictFilenames { arguments.append("--restrict-filenames") }
+        arguments.append(options.overwriteExisting ? "--force-overwrites" : "--no-overwrites")
+        return arguments
+    }
+
+    /// Always stated explicitly, because yt-dlp's own default depends on the URL's shape.
+    static func playlistModeArgument(for options: DownloadOptions) -> String {
+        options.downloadPlaylist ? "--yes-playlist" : "--no-playlist"
+    }
+
+    /// Playlist mode plus the item selection, which only means anything in playlist mode.
+    static func playlistArguments(for options: DownloadOptions) -> [String] {
+        var arguments = [playlistModeArgument(for: options)]
+        let items = options.playlistItems.trimmingCharacters(in: .whitespacesAndNewlines)
+        if options.downloadPlaylist, !items.isEmpty {
+            arguments += ["--playlist-items", items]
         }
+        return arguments
+    }
+
+    /// - Parameter allowsEmbedding: Whether the engine can mux subtitle tracks into the video.
+    static func subtitleArguments(for options: DownloadOptions, allowsEmbedding: Bool) -> [String] {
+        guard options.subtitleMode.isEnabled else { return [] }
+        var arguments: [String] = []
+        if options.subtitleMode.writesManual { arguments.append("--write-subs") }
+        if options.subtitleMode.writesAutomatic { arguments.append("--write-auto-subs") }
+        let languages = options.subtitleLanguages.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !languages.isEmpty {
+            arguments += ["--sub-langs", languages]
+        }
+        // Embedding only makes sense for a container that can carry a subtitle track.
+        if allowsEmbedding, options.embedSubtitles, options.kind == .video {
+            arguments.append("--embed-subs")
+        }
+        return arguments
+    }
+
+    static func artworkAndMetadataArguments(for options: DownloadOptions) -> [String] {
+        var arguments: [String] = []
+        if options.embedThumbnail { arguments.append("--embed-thumbnail") }
+        if options.embedMetadata { arguments.append("--embed-metadata") }
+        if options.embedChapters { arguments.append("--embed-chapters") }
+        if options.writeThumbnail { arguments.append("--write-thumbnail") }
+        if options.writeInfoJSON { arguments.append("--write-info-json") }
+        return arguments
+    }
+
+    /// Categories are sorted so the same choice always produces the same command.
+    static func sponsorBlockArguments(for options: DownloadOptions) -> [String] {
+        guard options.sponsorBlockMode != .off, !options.sponsorBlockCategories.isEmpty else { return [] }
+        let categories = options.sponsorBlockCategories
+            .map(\.rawValue)
+            .sorted()
+            .joined(separator: ",")
+        switch options.sponsorBlockMode {
+        case .mark: return ["--sponsorblock-mark", categories]
+        case .remove: return ["--sponsorblock-remove", categories]
+        case .off: return []
+        }
+    }
+
+    static func archiveArguments(for options: DownloadOptions) -> [String] {
+        let archivePath = options.downloadArchivePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard options.useDownloadArchive, !archivePath.isEmpty else { return [] }
+        return ["--download-archive", archivePath]
+    }
+
+    /// Reads cookies straight out of a browser profile, which only works where yt-dlp can reach
+    /// the browsers' files — never inside the iOS app.
+    static func browserCookieArguments(for options: DownloadOptions) -> [String] {
+        guard let browser = options.cookieBrowser.ytdlpValue else { return [] }
+        return ["--cookies-from-browser", browser]
+    }
+
+    /// A Netscape-format cookies file, the one way to sign in that works on every platform.
+    static func cookieFileArguments(for options: DownloadOptions) -> [String] {
+        let path = options.cookieFilePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return [] }
+        return ["--cookies", path]
+    }
+
+    /// Rate limit and fragment concurrency, which only matter when media is actually fetched.
+    static func transferArguments(for options: DownloadOptions) -> [String] {
+        var arguments: [String] = []
+        let rateLimit = options.rateLimit.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rateLimit.isEmpty {
+            arguments += ["--limit-rate", rateLimit]
+        }
+        if options.concurrentFragments > 1 {
+            arguments += ["--concurrent-fragments", String(options.concurrentFragments)]
+        }
+        return arguments
+    }
+
+    /// Proxy and user agent, which analysis needs as much as downloading: a geo-blocked page
+    /// can't even be described without the proxy.
+    static func connectionArguments(for options: DownloadOptions) -> [String] {
+        var arguments: [String] = []
         let proxy = options.proxy.trimmingCharacters(in: .whitespacesAndNewlines)
         if !proxy.isEmpty {
             arguments += ["--proxy", proxy]
@@ -234,9 +290,12 @@ enum ArgumentBuilder {
         if !userAgent.isEmpty {
             arguments += ["--user-agent", userAgent]
         }
-        arguments += CustomArgumentPolicy.safeArguments(from: options.customArguments)
-        arguments += ["--", url]
         return arguments
+    }
+
+    /// `--` guarantees a URL beginning with a dash is treated as a URL and never as a flag.
+    static func endOfOptions(url: String) -> [String] {
+        ["--", url]
     }
 
     // MARK: - Output templates

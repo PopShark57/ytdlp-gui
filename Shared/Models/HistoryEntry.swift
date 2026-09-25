@@ -52,7 +52,41 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
 
     var outputURL: URL? {
         guard let outputPath, !outputPath.isEmpty else { return nil }
+        #if os(iOS)
+        // iOS moves the app's container whenever the app is updated or reinstalled, so an
+        // absolute path stored by an earlier install is stale even though the file is still there.
+        if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            return Self.resolve(storedPath: outputPath, documentsDirectory: documents)
+        }
+        #endif
         return URL(fileURLWithPath: outputPath)
+    }
+
+    /// Finds a file recorded under some earlier container's `Documents` folder.
+    ///
+    /// The stored path is used whenever it still exists. Otherwise whatever followed a
+    /// `Documents` component is re-rooted under `documentsDirectory` and used if it exists there.
+    /// When nothing is found the stored path is returned unchanged, so the entry still names the
+    /// file and reports it as missing.
+    static func resolve(storedPath: String, documentsDirectory: URL) -> URL {
+        let stored = URL(fileURLWithPath: storedPath)
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: stored.path(percentEncoded: false)) else { return stored }
+
+        let components = stored.pathComponents
+        // Every occurrence is tried, from the first: the container's own `Documents` comes
+        // first, but a subfolder the user named "Documents" must not hide it.
+        for index in components.indices where components[index] == "Documents" {
+            let remainder = components[components.index(after: index)...]
+            guard !remainder.isEmpty else { continue }
+            let candidate = remainder.reduce(documentsDirectory) { url, component in
+                url.appending(path: component, directoryHint: .notDirectory)
+            }
+            if fileManager.fileExists(atPath: candidate.path(percentEncoded: false)) {
+                return candidate
+            }
+        }
+        return stored
     }
 
     /// Whether the downloaded file is still where we left it.
