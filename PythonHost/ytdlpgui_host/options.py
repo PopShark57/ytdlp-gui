@@ -9,7 +9,9 @@ field; this is the second line of defence.
 """
 
 import dataclasses
+import io
 import optparse
+import os
 
 from . import compat
 from .errors import HostError
@@ -86,12 +88,42 @@ def engine_params(parsed, *, logger, progress_hook, postprocessor_hook, cache_di
     # ffmpeg can't download HLS on iOS, so the native downloader is the only one that works.
     if compat.is_ios() and params.get('hls_prefer_native') is None:
         params['hls_prefer_native'] = True
+    if params.get('cookiefile') is not None:
+        params['cookiefile'] = _private_cookie_copy(params['cookiefile'])
     if for_analysis and params.get('extract_flat') in ('discard', 'discard_in_playlist'):
         # parse_options drops a playlist's entries after processing them unless something will
         # print the playlist. Analysis returns the playlist, so it keeps them, as
         # --dump-single-json would.
         params['extract_flat'] = False
     return params
+
+
+def _private_cookie_copy(cookie_file):
+    """This job's own copy of the `--cookies` file, as an in-memory stream.
+
+    yt-dlp writes the cookie jar back to the file when a job closes, truncating it first, and
+    the command-line tool never has to care because each run is a separate process. Here jobs
+    run side by side, so one job's save could let another read a half-written file, and the
+    last to close would silently undo the others' changes. Reading the file up front and
+    handing yt-dlp a stream instead (which `cookiefile` accepts) keeps the imported file exactly
+    as it was imported: every job starts from it, and whatever a job's cookie jar gathers stays
+    in that job.
+    """
+    if not isinstance(cookie_file, (str, bytes, os.PathLike)):
+        return cookie_file
+    from yt_dlp.utils import expand_path
+
+    try:
+        with open(expand_path(os.fsdecode(cookie_file)), encoding='utf-8') as file:
+            return io.StringIO(file.read())
+    except FileNotFoundError:
+        # yt-dlp would start with an empty jar and create the file on closing. Nothing is ever
+        # written back here, so there are simply no cookies, and yt-dlp's advice for pages that
+        # need them says to pass some rather than that the ones passed are stale.
+        return None
+    except (OSError, UnicodeError):
+        # Unreadable: leave the path, so yt-dlp reports the problem exactly as it would anyway.
+        return cookie_file
 
 
 # MARK: - Before parsing

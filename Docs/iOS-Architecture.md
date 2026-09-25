@@ -34,7 +34,8 @@ YTDLPGUI-iOS/                iOS app
 ├── Services/                Settings, notifications, Photos, storage, cookies, background work
 └── Views/                   SwiftUI, grouped by screen
 YTDLPGUI-iOS-Share/          Share extension: hands links to the app through an App Group
-YTDLPGUI-iOSTests/           iOS unit and integration tests (run in the Simulator)
+YTDLPGUI-iOSTests/           iOS unit and integration tests
+YTDLPGUI-iOSUITests/         UI walkthrough (live tests only)
 PythonHost/ytdlpgui_host/    The Python side of the engine (bundled into the app)
 PythonHost/tests/            Its tests, run on the Mac with the desktop Python
 Tools/fetch-ios-dependencies.sh   Downloads + verifies the Python runtime and wheels into Vendor/
@@ -185,8 +186,12 @@ All of it goes through yt-dlp's own extension points, not by editing its source:
   | `EmbedThumbnailPP` | `--embed-thumbnail` | `media.embed` |
   | `FFmpegThumbnailsConvertorPP` | thumbnail → JPEG | `media.convert_image` |
   | `ModifyChaptersPP` | `--sponsorblock-remove` | `media.remove_ranges` |
+  | `FFmpegFixupM4aPP` | rewraps YouTube's fragmented "DASH m4a" audio as a plain M4A | `media.extract_audio` (`codec: copy`) |
 
-  Fix-ups, subtitle embedding and conversion, remuxing and splitting remain ffmpeg-only; yt-dlp
+  `FFmpegMergerPP` and `FFmpegFixupM4aPP` are also replaced in the `yt_dlp.YoutubeDL` module's
+  namespace, because `YoutubeDL` creates them directly rather than through the table. Without the
+  fix-up replacement every YouTube audio download would warn that ffmpeg is missing. The other
+  fix-ups, subtitle embedding and conversion, remuxing and splitting remain ffmpeg-only; yt-dlp
   reports them as unavailable with a warning.
 - **JavaScript challenges.** YouTube requires solving JavaScript "n" and signature challenges.
   yt-dlp's EJS framework runs a solver script in an external runtime; the host registers a
@@ -209,14 +214,23 @@ these differences:
 - `--no-mtime`: files are dated when downloaded, which is what the Files app sorts by.
 - **Video** always ends up MP4 (`--merge-output-format mp4`), so format selection only accepts
   what AVFoundation can mux: H.264 or HEVC video (plus AV1 when the device decodes it in
-  hardware) in MP4, with AAC audio in M4A. Pre-merged MP4 is the fallback, and anything at all is
-  the last resort, downloaded as is:
-  `bv*[height<=?H][ext=mp4][vcodec~='^(avc|h264|hvc|hev|h265)']+ba[ext=m4a]/b[height<=?H][ext=mp4]/…/b`
+  hardware) in MP4, with AAC audio, either as `.m4a` or as any `mp4a` stream (HLS audio
+  renditions are AAC with an `.mp4` extension). Pre-merged MP4 is the fallback, first at the
+  height cap and then without it; after that come any pre-merged file and, last, any video and
+  audio pair, both downloaded as is. The pair keeps sites with no pre-merged format at all
+  (WebM-only DASH) working: if AVFoundation can't merge it, the host keeps both files with a
+  warning. With a height cap `H` (`ArgumentBuilder.embeddedVideoFormatSelector`):
+  `bv*[height<=?H][ext=mp4][vcodec~='^(avc|h264|hvc|hev|h265)']+(ba[ext=m4a]/ba[acodec^=mp4a])/b[height<=?H][ext=mp4]/bv*[ext=mp4][vcodec~='^(avc|h264|hvc|hev|h265)']+(ba[ext=m4a]/ba[acodec^=mp4a])/b[ext=mp4]/b/bv*+ba`
 - **Audio** prefers AAC sources (`ba[ext=m4a]/ba[acodec^=mp4a]/ba/b`), which AVFoundation can
   read. Available formats: Best (keep the original), M4A (AAC, with bitrate), ALAC, FLAC, WAV.
   MP3 and Opus have no encoder on iOS; if either arrives (from an old saved option) it becomes M4A.
 - **Subtitles** are written as separate files; `--embed-subs` is never passed.
-- **Cookies** come from `--cookies <file>`; `--cookies-from-browser` is never passed.
+- **Cookies** come from `--cookies <file>`; `--cookies-from-browser` is never passed. The host
+  reads the file when a job starts and gives yt-dlp an in-memory copy (`cookiefile` accepts a
+  text stream), so the imported file is never written. yt-dlp saves its cookie jar back to the
+  file whenever a job closes, truncating it first; with concurrent jobs, one job's save could
+  otherwise let another read a half-written file, and the last job to finish would silently undo
+  the others' changes.
 - **Custom arguments** use `CustomArgumentPolicy` with `context: .embedded`, which additionally
   rejects `--cookies-from-browser`, `--ffmpeg-location`, `-U`/`--update`/`--update-to`,
   `--js-runtimes`, `--no-js-runtimes` and `--remote-components`.
@@ -275,7 +289,10 @@ update.
   now also asserts the embedded argument rules.
 - `PythonHost/tests` run on the Mac against the vendored yt-dlp with a fake `_ytdlpgui` module:
   `python3 -m unittest discover -s PythonHost/tests -t PythonHost`.
-- `YTDLPGUI-iOSTests` run in the Simulator: media processing on generated clips, the JavaScript
-  runner, and the engine end to end — a download of a generated clip over a local HTTP server,
-  merged by AVFoundation — without touching the network. A live YouTube check runs only when
-  `YTDLPGUI_LIVE_TESTS=1` is set.
+- `YTDLPGUI-iOSTests` run on a device or in the Simulator: media processing on generated clips,
+  the JavaScript runner, and the engine end to end — a download of a generated clip over a local
+  HTTP server, merged by AVFoundation — without touching the network. A live YouTube check runs
+  only when `YTDLPGUI_LIVE_TESTS=1` is set (`TEST_RUNNER_YTDLPGUI_LIVE_TESTS=1` when passed
+  through `xcodebuild`).
+- `YTDLPGUI-iOSUITests` is a walkthrough from link to download, queue, history and settings. It
+  also needs the live flag, since it downloads from YouTube.

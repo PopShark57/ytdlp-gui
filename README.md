@@ -4,12 +4,13 @@
 
 # YTDLP GUI
 
-**A native macOS front end for [yt-dlp](https://github.com/yt-dlp/yt-dlp).**
+**A native macOS, iPhone and iPad front end for [yt-dlp](https://github.com/yt-dlp/yt-dlp).**
 
 Paste a link, pick a quality, click Download. Everything else stays out of the way
 until you ask for it.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey)
+![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20iPadOS%2018%2B-lightgrey)
 ![Swift](https://img.shields.io/badge/Swift-6-orange)
 ![Interface](https://img.shields.io/badge/UI-SwiftUI-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -25,8 +26,12 @@ Mac interface. It parses yt-dlp's output into real UI state — a progress bar, 
 an estimated time, a named post-processing stage — instead of dumping terminal text into a
 window. Errors arrive as sentences a person can act on, with the original output one click away.
 
-The app is a front end only. It does not bundle, vendor or install `yt-dlp`: it drives the copy
-you install yourself, so you decide when it updates and where it comes from.
+On the Mac the app is a front end only. It does not bundle, vendor or install `yt-dlp`: it
+drives the copy you install yourself, so you decide when it updates and where it comes from.
+
+iPhone and iPad can't launch other programs, so the [iOS app](#iphone-and-ipad) is different: it
+carries its own copy of yt-dlp, running inside an embedded Python interpreter, and does with
+Apple's media frameworks what ffmpeg does on the Mac.
 
 ## Features
 
@@ -191,11 +196,174 @@ placeholders are listed in the app under **Template placeholders**.
 %(playlist_title)s/%(playlist_index)02d - %(title)s.%(ext)s
 ```
 
+## iPhone and iPad
+
+The iOS app is the same product — paste a link, pick a quality, download — rebuilt around one
+hard constraint: an iOS app cannot launch another program. There is no `Process`, no Homebrew
+and no ffmpeg, so the app carries its own engine:
+
+- **yt-dlp runs in-process**, in an embedded CPython 3.14
+  ([BeeWare's `Python.xcframework`](https://github.com/beeware/Python-Apple-support)).
+- **AVFoundation replaces ffmpeg** for merging video with audio, extracting and converting audio,
+  embedding metadata, artwork and chapters, and cutting SponsorBlock segments.
+- **JavaScriptCore solves YouTube's JavaScript challenges**, through a yt-dlp challenge provider
+  the app registers as the `jsc` runtime.
+
+[`Docs/iOS-Architecture.md`](Docs/iOS-Architecture.md) is the full design, including the JSON
+protocol between Swift and Python.
+
+### How it differs from the Mac app
+
+| | macOS | iPhone and iPad |
+|---|---|---|
+| **yt-dlp** | Your own install | Bundled; updatable from **Settings › Engine** |
+| **Video** | MP4, MKV, WebM or automatic | MP4 only (H.264 or HEVC; AV1 on devices that decode it in hardware) |
+| **Audio** | Best, MP3, M4A, FLAC, WAV, Opus | Best, M4A (AAC), ALAC, FLAC, WAV — iOS has no MP3 or Opus encoder |
+| **Subtitles** | Saved or embedded | Saved as separate files beside the download |
+| **Cookies** | Read from a browser | An imported `cookies.txt` file |
+| **Output** | Any folder | The app's Documents folder |
+
+Options saved with MP3 or Opus (by an older build, say) become M4A rather than failing.
+
+### Where downloads go
+
+Finished files appear in **Files › On My iPhone (or iPad) › YTDLP GUI**. Partial downloads stay
+in the app's caches until they finish, so the Files app only ever shows complete files;
+**Settings › Storage** can clear what cancelled downloads leave behind. Videos can also be
+saved to Photos automatically (**Settings › Downloads**).
+
+### Links from other apps
+
+- **Share sheet** — share a page or video to **YTDLP GUI** and choose Download Video, Download
+  Audio or Add. The links wait in a shared inbox and are picked up the next time the app opens.
+  The inbox needs an App Group; builds without one (see [Signing](#signing)) offer **Copy Link**
+  instead.
+- **Shortcuts and Siri** — the **Download with YTDLP GUI** action takes a link and Video or
+  Audio, and starts the download.
+- **URL scheme** — `ytdlpgui://download?url=<percent-encoded URL>&kind=video|audio` fills in the
+  Download screen. It never starts a download by itself, so a web page can't.
+
+### Cookies
+
+Browsers' cookie stores aren't reachable from an iOS app. Sign in on a computer, export the
+site's cookies in Netscape (`cookies.txt`) format with a browser extension, move the file to the
+device, and import it in **Settings › Cookies**. The app validates it and keeps its own copy,
+excluded from device backups. Every download reads that copy fresh: yt-dlp's end-of-download
+cookie updates are never written back, so simultaneous downloads can't corrupt it.
+
+### Keeping yt-dlp up to date
+
+Extractors break whenever sites change. **Settings › Engine › Check for Updates** looks for the
+newest yt-dlp on PyPI; installing it downloads the wheel and the yt-dlp-ejs release it needs,
+checks both against the SHA-256 digests PyPI publishes, and takes effect the next time the app
+opens. If an update ever fails to load, the app falls back to the bundled copy and says so.
+**Use Bundled Version** removes the update.
+
+### Background downloads
+
+On iOS 26 and later a download started in the foreground keeps running in the background, with
+the system's progress UI. Earlier versions get iOS's usual short grace period, after which a
+download pauses and resumes from its partial file when you return. The screen can be kept awake
+while downloads run (**Settings › Downloads**).
+
+### Requirements
+
+| | |
+|---|---|
+| **iOS / iPadOS** | 18.0 or later |
+| **Xcode** | 16 or later (to build), on a Mac |
+| **Network** | Once, to fetch the Python runtime and wheels |
+
+### Building for iOS
+
+The Python runtime and the Python packages are not committed. Fetch them once, and again
+whenever the pins in the script change:
+
+```bash
+./Tools/fetch-ios-dependencies.sh
+```
+
+It downloads BeeWare's Python support package and the yt-dlp, yt-dlp-ejs and certifi wheels,
+verifies each against a pinned SHA-256 digest, and unpacks them into the git-ignored `Vendor/`
+folder. A build phase (`Tools/install-ios-python.sh`) then installs them into the app bundle.
+
+Open `YTDLPGUI.xcodeproj`, choose the **YTDLPGUI-iOS** scheme and a device, and run.
+
+### Signing
+
+The iOS targets need a development team. Pass yours on the command line rather than writing it
+into the project:
+
+```bash
+xcodebuild -scheme YTDLPGUI-iOS -destination 'id=<device id>' -allowProvisioningUpdates \
+  DEVELOPMENT_TEAM=<team id> build
+```
+
+With a **free Personal Team**, also pass `CODE_SIGN_ENTITLEMENTS=` (empty). Personal Teams can't
+use App Groups, so the build drops the `group.io.github.ytdlpgui.YTDLPGUI` group and the Share
+extension falls back to **Copy Link**. Apps signed that way also stop launching after seven days
+and have to be reinstalled. A paid Apple Developer Program team keeps the App Group, and with it
+the share inbox.
+
+### Distribution
+
+The iOS app is for sideloading only: build it yourself, or distribute it through your own
+development or ad-hoc signing. App Review Guideline 5.2.3 rejects apps that download media from
+third-party sources such as YouTube without their authorisation, so it can't go on the App Store.
+
+### Running the iOS tests
+
+```bash
+# Unit and integration tests, on a connected device
+xcodebuild test -scheme YTDLPGUI-iOS -destination 'id=<device id>' \
+  -allowProvisioningUpdates DEVELOPMENT_TEAM=<team id> CODE_SIGN_ENTITLEMENTS= \
+  -only-testing:YTDLPGUI-iOSTests
+```
+
+```bash
+# The Python side of the engine, on the Mac
+PYTHONPATH=Vendor/python-packages:PythonHost python3.14 -m unittest discover -s PythonHost/tests -t PythonHost
+```
+
+The integration tests drive the real embedded engine end to end — an HTTP download from a local
+server, a DASH merge through AVFoundation, audio extraction, cancellation and concurrent
+downloads — without touching the internet. Tests against YouTube itself and a UI walkthrough run
+only when `TEST_RUNNER_YTDLPGUI_LIVE_TESTS=1` is set. The Python tests generate their media fixtures
+with ffmpeg; without it, the tests that need fixtures are skipped.
+
 ## Architecture
 
 MVVM, with a strict separation between the code that talks to yt-dlp and the code that draws
 the interface. Everything is `@MainActor` except the child processes themselves, whose output
 arrives as an `AsyncStream`, which keeps the model single-threaded and free of locks.
+
+The code is split between what both apps share and what each platform does its own way:
+
+```
+Shared/                      Platform-neutral Swift, compiled into both apps
+├── Models/                  Options, media info, progress, failures, history
+├── Services/                ArgumentBuilder (+Embedded for iOS), ProgressParser, HistoryStore
+└── Utilities/               CustomArgumentPolicy, formatters, quoting, URL detection
+YTDLPGUI/                    The macOS app (below)
+YTDLPGUI-iOS/                The iOS app
+├── App/                     Entry point, AppModel (composition root), link handling
+├── Engine/
+│   ├── Runtime/             C bridge to CPython, YTDLPEngine, request routing
+│   ├── JavaScript/          JavaScriptCore runner for YouTube's challenge solver
+│   └── Media/               AVFoundation replacements for ffmpeg
+├── ViewModels/              DownloadQueue, DownloadComposer, EngineController
+├── Services/                Settings, notifications, Photos, storage, cookies, background work
+├── Intents/                 The Shortcuts action
+└── Views/                   SwiftUI, grouped by screen
+YTDLPGUI-iOS-Share/          Share extension
+YTDLPGUI-iOSTests/           iOS unit and integration tests
+YTDLPGUI-iOSUITests/         UI walkthrough (live tests only)
+PythonHost/ytdlpgui_host/    The Python side of the iOS engine, bundled into the app
+PythonHost/tests/            Its tests, run on the Mac
+Tools/                       Icon generator, iOS dependency fetcher and install phase
+```
+
+The macOS app:
 
 ```
 YTDLPGUI/
@@ -264,20 +432,33 @@ read as grit.
 ./Tools/generate-app-icon.sh
 ```
 
-That rewrites `YTDLPGUI/Assets.xcassets/AppIcon.appiconset/` (PNGs plus `Contents.json`),
-`Icon/AppIcon.svg` and `Icon/AppIcon.icns`. It needs nothing but a Swift toolchain.
+That rewrites:
+
+- the macOS icon: `YTDLPGUI/Assets.xcassets/AppIcon.appiconset/` (PNGs plus `Contents.json`),
+  `Icon/AppIcon.svg` and `Icon/AppIcon.icns`;
+- the iOS icon: `YTDLPGUI-iOS/Assets.xcassets/AppIcon.appiconset/`, a full-bleed 1024px square
+  (iOS applies the rounded mask itself) in the light, dark and tinted Home Screen appearances,
+  with the light one kept opaque because the App Store rejects an icon with an alpha channel;
+- the iOS accent colour: `YTDLPGUI-iOS/Assets.xcassets/AccentColor.colorset/`, the icon's indigo
+  adjusted for contrast in light and dark mode.
+
+It needs nothing but a Swift toolchain.
 
 ## Contributing
 
 Issues and pull requests are welcome.
 
-- Keep the dependency list empty. This project deliberately uses only Apple frameworks.
+- Keep the dependency list empty. The macOS app deliberately uses only Apple frameworks; the
+  iOS app adds only the runtime it can't do without (Python and the wheels pinned in
+  `Tools/fetch-ios-dependencies.sh`).
 - Pure logic belongs in `Services/` with tests. `ArgumentBuilder` and `ProgressParser` are pure
   functions specifically so they can be tested without launching anything.
 - If you change how a command is built, add a test that asserts the resulting argument array.
   The command preview is a user-facing promise about what will run.
 - Match the surrounding style: comments explain *why*, not *what*.
-- Run `xcodebuild test -scheme YTDLPGUI -destination 'platform=macOS'` before opening a PR.
+- Run `xcodebuild test -scheme YTDLPGUI -destination 'platform=macOS'` before opening a PR, and
+  the Python host tests if you touched `PythonHost/`. `Shared/` is compiled into both apps, so a
+  change there has to build for iOS too.
 
 ## Troubleshooting
 
@@ -299,12 +480,33 @@ missing, the app shows a setup screen with the install command.
 
 Released under the [MIT License](LICENSE).
 
+The iOS app bundles third-party components, each under its own licence, which the app lists in
+**Settings › Acknowledgements**:
+
+| Component | Licence |
+|---|---|
+| [Python](https://www.python.org) 3.14 | PSF License |
+| [BeeWare Python-Apple-support](https://github.com/beeware/Python-Apple-support) | BSD-3-Clause |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Unlicense |
+| [yt-dlp-ejs](https://github.com/yt-dlp/ejs) | Unlicense; its solver bundles meriyah (ISC) and astring (MIT) |
+| [certifi](https://github.com/certifi/python-certifi) | MPL-2.0 |
+| OpenSSL | Apache-2.0 |
+| libFFI | MIT |
+| BZip2 | bzip2 licence |
+| XZ Utils | 0BSD |
+| mpdecimal | BSD-2-Clause |
+| Zstandard | BSD-3-Clause |
+| SQLite | Public domain |
+
+The Python-based components come from BeeWare's support package, which builds them for iOS.
+
 ## A note on affiliation
 
 This project is an independent, unofficial graphical front end. It is **not affiliated with,
 endorsed by, or connected to YouTube, Google, or the yt-dlp project** in any way. yt-dlp and
-ffmpeg are separate projects distributed under their own licenses; this application neither
-bundles nor redistributes them.
+ffmpeg are separate projects distributed under their own licenses. The macOS app neither
+bundles nor redistributes them; the iOS app bundles an unmodified copy of yt-dlp under its
+Unlicense and does not include ffmpeg at all.
 
 You are responsible for how you use it. Respect the terms of service of the sites you download
 from and the copyright of the material you download.
