@@ -170,6 +170,8 @@ final class AppModel {
         // Starting Python takes a moment; everything else can happen meanwhile, and queued
         // downloads wait for it by themselves.
         let engineStart = Task { [engine] in await engine.start() }
+        // Earlier builds kept passwords and other credentials in history.
+        history.updateEntries { $0.removeSecrets() }
         queue.restoreUnfinishedItems()
         receiveSharedLinks()
         await checkClipboard()
@@ -336,10 +338,15 @@ final class AppModel {
         if item.durationSeconds == nil { item.durationSeconds = entry.durationSeconds }
         selectedTab = .queue
 
+        var notes: [String] = []
         if !sanitized.removed.isEmpty {
-            composer.showStatus(
-                "Removed \(Self.describe(sanitized.removed)) before downloading again."
-            )
+            notes.append("Removed \(Self.describe(sanitized.removed)) before downloading again.")
+        }
+        if let secrets = entry.removedSecretOptions, !secrets.isEmpty {
+            notes.append(Self.describeRemovedSecrets(secrets))
+        }
+        if !notes.isEmpty {
+            composer.showStatus(notes.joined(separator: " "))
         }
     }
 
@@ -352,9 +359,16 @@ final class AppModel {
     func loadIntoComposer(_ entry: HistoryEntry) {
         if let options = entry.options {
             composer.loadOptions(options)
+            var notes: [String] = []
             let removed = DownloadOptionsResolver.sanitizedCustomArguments(options.customArguments).removed
             if !removed.isEmpty {
-                composer.showStatus("Removed \(Self.describe(removed)) from the custom arguments.")
+                notes.append("Removed \(Self.describe(removed)) from the custom arguments.")
+            }
+            if let secrets = entry.removedSecretOptions, !secrets.isEmpty {
+                notes.append(Self.describeRemovedSecrets(secrets) + " Add them again in Advanced Options if they're needed.")
+            }
+            if !notes.isEmpty {
+                composer.showStatus(notes.joined(separator: " "))
             }
         } else {
             composer.options.kind = entry.kind
@@ -393,5 +407,11 @@ final class AppModel {
     private static func describe(_ flags: [String]) -> String {
         let listed = flags.map { "‘\($0)’" }.joined(separator: ", ")
         return "the unsupported option\(flags.count == 1 ? "" : "s") \(listed)"
+    }
+
+    /// For history entries saved without their credentials (`HistoryEntry.removedSecretOptions`).
+    private static func describeRemovedSecrets(_ flags: [String]) -> String {
+        let listed = flags.map { "‘\($0)’" }.joined(separator: ", ")
+        return "History doesn't keep passwords or other credentials, so those given with \(listed) were left out."
     }
 }

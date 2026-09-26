@@ -101,7 +101,8 @@ final class DownloadComposer {
     }
 
     /// The yt-dlp arguments that will be used, shell-quoted, for the preview. Built from the same
-    /// resolved options and capabilities the queue uses, so it is the real argument vector.
+    /// resolved options and capabilities the queue uses, so it is the real argument vector, with
+    /// passwords and other credentials shown as `PRIVATE`.
     var commandPreview: String {
         let url = detectedURLs.first ?? "URL"
         let arguments = ArgumentBuilder.embeddedDownloadArguments(
@@ -109,7 +110,7 @@ final class DownloadComposer {
             options: resolver.resolve(options),
             capabilities: engine.capabilities
         )
-        return ShellQuoting.commandLine(executable: "yt-dlp", arguments: arguments)
+        return ShellQuoting.commandLine(executable: "yt-dlp", arguments: ShellQuoting.redactingSecrets(arguments))
     }
 
     /// Warnings worth showing before the user downloads.

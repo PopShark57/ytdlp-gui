@@ -450,3 +450,31 @@ extension DownloadOptions {
         self = options
     }
 }
+
+// MARK: - Secrets
+
+extension DownloadOptions {
+
+    /// These options without passwords, one-time codes and other credentials, for keeping in
+    /// history or as the last-used options. Custom arguments lose the options
+    /// `ShellQuoting.removingSecrets` removes, and proxies keep their address but lose their user
+    /// name and password. Also returns the options that lost something (`--password`, `--proxy`),
+    /// so the person can be told.
+    func removingSecrets() -> (options: DownloadOptions, removed: [String]) {
+        var options = self
+        var removed: [String] = []
+
+        let arguments = ShellQuoting.removingSecrets(ShellQuoting.split(customArguments))
+        if !arguments.removed.isEmpty {
+            options.customArguments = arguments.arguments.map(ShellQuoting.quote).joined(separator: " ")
+            removed += arguments.removed
+        }
+
+        let proxy = ShellQuoting.proxyURLWithoutCredentials(self.proxy)
+        if proxy != self.proxy {
+            options.proxy = proxy
+            if !removed.contains("--proxy") { removed.append("--proxy") }
+        }
+        return (options, removed)
+    }
+}

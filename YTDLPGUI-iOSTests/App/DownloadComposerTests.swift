@@ -209,6 +209,24 @@ struct DownloadComposerTests {
         #expect(composer.commandPreview.contains("--cookies " + ShellQuoting.quote(env.cookies.storedFileURL.path(percentEncoded: false))))
     }
 
+    @Test("The command preview masks credentials")
+    func commandPreviewRedactsSecrets() async throws {
+        let env = try await readyEnvironment()
+        let composer = env.composer
+        composer.setURLText(url, analyzeIfEnabled: false)
+        composer.options.customArguments = "--password s3cret -2 123456"
+        composer.options.proxy = "socks5://user:pass@proxy.test:1080"
+
+        let preview = composer.commandPreview
+        #expect(!preview.contains("s3cret"))
+        #expect(!preview.contains("123456"))
+        #expect(!preview.contains("user:pass"))
+        #expect(preview.contains("--password PRIVATE"))
+        #expect(preview.contains("socks5://PRIVATE@proxy.test:1080"))
+        // Only the display is masked.
+        #expect(composer.options.customArguments == "--password s3cret -2 123456")
+    }
+
     @Test("Queued options carry this install's paths; the composer's own options don't")
     func optionNormalisation() async throws {
         let env = try await readyEnvironment()

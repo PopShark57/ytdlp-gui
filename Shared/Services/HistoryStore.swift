@@ -64,6 +64,18 @@ final class HistoryStore {
         scheduleSave()
     }
 
+    /// Rewrites every entry with `transform`, saving only if something changed. Used to remove
+    /// what earlier builds stored and this one no longer keeps.
+    func updateEntries(_ transform: (inout HistoryEntry) -> Void) {
+        var updated = entries
+        for index in updated.indices {
+            transform(&updated[index])
+        }
+        guard updated != entries else { return }
+        entries = updated
+        scheduleSave()
+    }
+
     /// Drops entries whose file no longer exists on disk.
     func removeMissingFiles() {
         entries.removeAll { $0.succeeded && !$0.fileExists }

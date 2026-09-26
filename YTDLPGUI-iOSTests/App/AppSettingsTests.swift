@@ -95,6 +95,26 @@ struct AppSettingsTests {
         #expect(restored.outputDirectory == DownloadOptions.defaultDownloadsDirectory)
     }
 
+    @Test("The last options are remembered without credentials, including ones an older build saved")
+    func storedOptionsDropSecrets() throws {
+        let suite = try Suite()
+        let settings = AppSettings(defaults: suite.defaults)
+        var options = DownloadOptions()
+        options.customArguments = "--username me --password s3cret --no-mtime"
+        options.proxy = "http://user:pass@proxy.test:3128"
+        settings.rememberOptions(options)
+        #expect(settings.storedOptions.customArguments == "--no-mtime")
+        #expect(settings.storedOptions.proxy == "http://proxy.test:3128")
+
+        // As an earlier build would have saved them.
+        let saved = try JSONEncoder().encode(options)
+        suite.defaults.set(saved, forKey: "lastDownloadOptions")
+        let relaunched = AppSettings(defaults: suite.defaults)
+        #expect(relaunched.storedOptions.customArguments == "--no-mtime")
+        let rewritten = try #require(suite.defaults.data(forKey: "lastDownloadOptions"))
+        #expect(!String(decoding: rewritten, as: UTF8.self).contains("s3cret"))
+    }
+
     @Test("Resetting restores every default and forgets the last options")
     func reset() throws {
         let suite = try Suite()

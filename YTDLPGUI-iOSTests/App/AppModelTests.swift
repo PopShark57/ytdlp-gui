@@ -183,6 +183,42 @@ struct AppModelTests {
         #expect(model.composer.statusMessage == "One download wasn't retried because its link is already in the queue.")
     }
 
+    @Test("Download Again and Edit Options say which credentials history left out")
+    func removedSecretsAreExplained() async throws {
+        let env = try AppTestEnvironment()
+        env.settings.autoAnalyzePastedURLs = false
+        let model = env.makeAppModel()
+        var options = DownloadOptions()
+        options.customArguments = "--no-mtime"
+        let entry = HistoryEntry(
+            title: "Clip", sourceURL: url, formatSummary: "Best", kind: .video, succeeded: true,
+            options: options, removedSecretOptions: ["--password"]
+        )
+
+        model.loadIntoComposer(entry)
+        #expect(model.composer.statusMessage?.contains("‘--password’") == true)
+        #expect(model.composer.statusMessage?.contains("Advanced Options") == true)
+
+        model.composer.dismissStatus()
+        model.downloadAgain(entry)
+        #expect(model.queue.items.count == 1)
+        #expect(model.composer.statusMessage?.contains("‘--password’") == true)
+    }
+
+    @Test("Launch removes credentials an older build kept in history")
+    func launchRemovesSecretsFromHistory() async throws {
+        let env = try AppTestEnvironment()
+        var options = DownloadOptions()
+        options.customArguments = "--password s3cret --no-mtime"
+        env.history.add(HistoryEntry(title: "Clip", sourceURL: url, formatSummary: "Best", kind: .video, succeeded: true, options: options))
+        let model = env.makeAppModel()
+
+        await model.performLaunchSetup()
+        let entry = try #require(env.history.entries.first)
+        #expect(entry.options?.customArguments == "--no-mtime")
+        #expect(entry.removedSecretOptions == ["--password"])
+    }
+
     @Test("Loading a history entry into the Download screen keeps its options but not its paths")
     func loadIntoComposer() async throws {
         let env = try AppTestEnvironment()

@@ -17,6 +17,9 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     var durationSeconds: Double?
     /// The options used, so "Download again" reproduces the original request exactly.
     var options: DownloadOptions?
+    /// Options whose passwords or other credentials were left out of `options` when the entry
+    /// was saved, e.g. `--password`, so "Download again" can say so. `nil` when nothing was.
+    var removedSecretOptions: [String]?
 
     init(
         id: UUID = UUID(),
@@ -32,7 +35,8 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
         thumbnailURL: URL? = nil,
         fileSizeBytes: Int64? = nil,
         durationSeconds: Double? = nil,
-        options: DownloadOptions? = nil
+        options: DownloadOptions? = nil,
+        removedSecretOptions: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -48,6 +52,21 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
         self.fileSizeBytes = fileSizeBytes
         self.durationSeconds = durationSeconds
         self.options = options
+        self.removedSecretOptions = removedSecretOptions
+    }
+
+    /// Leaves passwords and other credentials out of `options`, and records which options had
+    /// them. See `DownloadOptions.removingSecrets()`.
+    mutating func removeSecrets() {
+        guard let options else { return }
+        let stripped = options.removingSecrets()
+        guard !stripped.removed.isEmpty else { return }
+        self.options = stripped.options
+        var removed = removedSecretOptions ?? []
+        for name in stripped.removed where !removed.contains(name) {
+            removed.append(name)
+        }
+        removedSecretOptions = removed
     }
 
     var outputURL: URL? {

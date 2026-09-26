@@ -412,7 +412,8 @@ final class DownloadQueue {
             options: options,
             capabilities: capabilities
         )
-        item.log.append("$ " + ShellQuoting.commandLine(executable: "yt-dlp", arguments: argv))
+        // Logs get shared in bug reports, so secrets are masked here; the engine gets the real argv.
+        item.log.append("$ " + ShellQuoting.commandLine(executable: "yt-dlp", arguments: ShellQuoting.redactingSecrets(argv)))
 
         let jobID = UUID()
         jobIDs[item.id] = jobID
@@ -616,7 +617,11 @@ final class DownloadQueue {
             completedSinceIdle += 1
         }
 
-        history.add(item.makeHistoryEntry())
+        var entry = item.makeHistoryEntry()
+        // History outlives the download and is included in device backups, so passwords and
+        // other credentials stay out of it. The item keeps them, so a retry still works.
+        entry.removeSecrets()
+        history.add(entry)
 
         if settings.notifyWhenComplete {
             let notifications = notifications

@@ -94,6 +94,55 @@ struct DownloadQueueTests {
         #expect(item.options.outputDirectory == env.storage.downloadsDirectory)
     }
 
+    @Test("The log masks credentials, while the engine gets the real ones")
+    func logRedactsSecrets() async throws {
+        let env = try AppTestEnvironment()
+        var options = DownloadOptions()
+        options.customArguments = "--password s3cret --proxy http://u:p@h:1 --no-mtime"
+        let item = env.queue.enqueue(url: url, options: options).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        #expect(job.argv.contains("s3cret"))
+        #expect(job.argv.contains("http://u:p@h:1"))
+        let commandLine = try #require(item.log.lines.first)
+        #expect(commandLine.hasPrefix("$ yt-dlp "))
+        #expect(!commandLine.contains("s3cret"))
+        #expect(!commandLine.contains("u:p"))
+        #expect(commandLine.contains("--password PRIVATE"))
+        #expect(commandLine.contains("http://PRIVATE@h:1"))
+    }
+
+    @Test("History and the last-used options don't keep credentials; the saved queue does, out of backups")
+    func secretsStayOutOfHistory() async throws {
+        let env = try AppTestEnvironment()
+        env.settings.maximumConcurrentDownloads = 1
+        var options = DownloadOptions()
+        options.customArguments = "--password s3cret --no-mtime"
+        options.proxy = "http://user:pass@proxy.test:3128"
+        let item = env.queue.enqueue(url: url, options: options).item
+        let waiting = env.queue.enqueue(url: "https://example.com/b", options: options).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        #expect(env.settings.storedOptions.customArguments == "--no-mtime")
+        #expect(env.settings.storedOptions.proxy == "http://proxy.test:3128")
+
+        // The waiting download needs its password to run after a relaunch.
+        env.queue.flushPersistence()
+        let saved = try #require(QueueStore(fileURL: env.queueStoreURL).load().first { $0.id == waiting.id })
+        #expect(saved.options.customArguments.contains("s3cret"))
+        let values = try env.queueStoreURL.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        #expect(values.isExcludedFromBackup == true)
+
+        job.succeed()
+        try await waitUntil("completion") { item.state == .completed }
+        let entry = try #require(env.history.entries.first)
+        #expect(entry.options?.customArguments == "--no-mtime")
+        #expect(entry.options?.proxy == "http://proxy.test:3128")
+        #expect(entry.removedSecretOptions == ["--password", "--proxy"])
+        // The finished item itself still has them, for a retry.
+        #expect(item.options.customArguments.contains("s3cret"))
+    }
+
     @Test("Playlist items update the position, and each finished file counts once")
     func playlistEvents() async throws {
         let env = try AppTestEnvironment()

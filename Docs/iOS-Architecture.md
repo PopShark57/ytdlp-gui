@@ -64,7 +64,8 @@ YTDLPGUI-iOS.app/
 | `Library/Caches/Partial Downloads/` | In-progress files (`--paths temp:`). Moved into Documents when finished. |
 | `Library/Caches/python-bytecode/` | Compiled byte code (`pycache_prefix`); the bundle is read-only. |
 | `Library/Caches/yt-dlp/` | yt-dlp's own cache (`cachedir`). |
-| `Library/Application Support/YTDLPGUI/history.json` | Download history (shared `HistoryStore`). |
+| `Library/Application Support/YTDLPGUI/history.json` | Download history (shared `HistoryStore`). Saved without credentials. |
+| `Library/Application Support/YTDLPGUI/queue.json` | Unfinished downloads, with their full options. Excluded from backups. |
 | `Library/Application Support/Engine/yt-dlp/` | An installed yt-dlp update (`yt_dlp/`, `yt_dlp_ejs/`), if any. |
 | `Library/Application Support/Engine/staging/` | Scratch space while an update is installed. |
 | `Library/Application Support/Cookies/cookies.txt` | The imported cookies file, if any. |
@@ -74,6 +75,16 @@ YTDLPGUI-iOS.app/
 The container path changes when iOS updates or reinstalls the app, so no absolute path is
 trusted across launches: option paths are re-resolved when a download is queued, and history
 entries whose absolute path has gone stale are re-rooted under the current Documents folder.
+
+Passwords, two-factor codes, proxy credentials and authorisation headers can be given in the
+custom arguments and the proxy field. They reach yt-dlp unchanged, but:
+
+- the command preview and each download's log show them as `PRIVATE`
+  (`ShellQuoting.redactingSecrets`, which follows yt-dlp's own `Config.hide_login_info`);
+- history entries and the last-used options (`UserDefaults`) are saved without them
+  (`DownloadOptions.removingSecrets`). A history entry records which options lost something
+  (`removedSecretOptions`), so *Download Again* and *Edit Options and Download* can say so;
+- `queue.json` keeps them, so interrupted downloads can resume, and is excluded from backups.
 
 ## Runtime and threading
 
