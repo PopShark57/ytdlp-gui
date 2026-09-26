@@ -257,7 +257,8 @@ Extractors break whenever sites change. **Settings › Engine › Check for Upda
 newest yt-dlp on PyPI; installing it downloads the wheel and the yt-dlp-ejs release it needs,
 checks both against the SHA-256 digests PyPI publishes, and takes effect the next time the app
 opens. If an update ever fails to load, the app falls back to the bundled copy and says so.
-**Use Bundled Version** removes the update.
+**Use Bundled Version** switches back to the bundled copy from the next launch. Both are safe while
+downloads run: the files the running engine uses are left alone until the app next opens.
 
 ### Background downloads
 
@@ -356,6 +357,7 @@ YTDLPGUI-iOS/                The iOS app
 ├── Intents/                 The Shortcuts action
 └── Views/                   SwiftUI, grouped by screen
 YTDLPGUI-iOS-Share/          Share extension
+ShareInbox/                  The Share extension's inbox format, compiled into the app too
 YTDLPGUI-iOSTests/           iOS unit and integration tests
 YTDLPGUI-iOSUITests/         UI walkthrough (live tests only)
 PythonHost/ytdlpgui_host/    The Python side of the iOS engine, bundled into the app

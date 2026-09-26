@@ -104,6 +104,7 @@
 		B2C3D4000000000000000003 /* YTDLPGUI-iOSTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "YTDLPGUI-iOSTests"; sourceTree = "<group>"; };
 		B2C3D4000000000000000004 /* YTDLPGUI-iOS-Share */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (B2C3D4000000000000000006 /* Exceptions for "YTDLPGUI-iOS-Share" folder in "YTDLPGUI-iOS-Share" target */, ); explicitFileTypes = {}; explicitFolders = (); path = "YTDLPGUI-iOS-Share"; sourceTree = "<group>"; };
 		B2C3D400000000000000000A /* YTDLPGUI-iOSUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = "YTDLPGUI-iOSUITests"; sourceTree = "<group>"; };
+		B2C3D4000000000000000050 /* ShareInbox */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = ShareInbox; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -161,6 +162,7 @@
 				A1B2C3000000000000000015 /* YTDLPGUITests */,
 				B2C3D4000000000000000002 /* YTDLPGUI-iOS */,
 				B2C3D4000000000000000004 /* YTDLPGUI-iOS-Share */,
+				B2C3D4000000000000000050 /* ShareInbox */,
 				B2C3D4000000000000000003 /* YTDLPGUI-iOSTests */,
 				B2C3D400000000000000000A /* YTDLPGUI-iOSUITests */,
 				B2C3D4000000000000000009 /* PythonHost */,
@@ -258,6 +260,7 @@
 			fileSystemSynchronizedGroups = (
 				B2C3D4000000000000000001 /* Shared */,
 				B2C3D4000000000000000002 /* YTDLPGUI-iOS */,
+				B2C3D4000000000000000050 /* ShareInbox */,
 			);
 			name = "YTDLPGUI-iOS";
 			packageProductDependencies = (
@@ -303,6 +306,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				B2C3D4000000000000000004 /* YTDLPGUI-iOS-Share */,
+				B2C3D4000000000000000050 /* ShareInbox */,
 			);
 			name = "YTDLPGUI-iOS-Share";
 			packageProductDependencies = (
@@ -758,7 +762,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "This application is an independent front end and is not affiliated with yt-dlp, YouTube or Google.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "YTDLP GUI saves the videos you download to your photo library when you ask it to.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -800,7 +804,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "This application is an independent front end and is not affiliated with yt-dlp, YouTube or Google.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "YTDLP GUI saves the videos you download to your photo library when you ask it to.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

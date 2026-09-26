@@ -34,6 +34,7 @@ YTDLPGUI-iOS/                iOS app
 ├── Services/                Settings, notifications, Photos, storage, cookies, background work
 └── Views/                   SwiftUI, grouped by screen
 YTDLPGUI-iOS-Share/          Share extension: hands links to the app through an App Group
+ShareInbox/                  The inbox format, compiled into both the app and the extension
 YTDLPGUI-iOSTests/           iOS unit and integration tests
 YTDLPGUI-iOSUITests/         UI walkthrough (live tests only)
 PythonHost/ytdlpgui_host/    The Python side of the engine (bundled into the app)
@@ -64,8 +65,10 @@ YTDLPGUI-iOS.app/
 | `Library/Caches/Partial Downloads/` | In-progress files (`--paths temp:`). Moved into Documents when finished. |
 | `Library/Caches/python-bytecode/` | Compiled byte code (`pycache_prefix`); the bundle is read-only. |
 | `Library/Caches/yt-dlp/` | yt-dlp's own cache (`cachedir`). |
-| `Library/Application Support/YTDLPGUI/history.json` | Download history (shared `HistoryStore`). |
-| `Library/Application Support/Engine/yt-dlp/` | An installed yt-dlp update (`yt_dlp/`, `yt_dlp_ejs/`), if any. |
+| `Library/Application Support/YTDLPGUI/history.json` | Download history (shared `HistoryStore`). Saved without credentials. |
+| `Library/Application Support/YTDLPGUI/queue.json` | Unfinished downloads, with their full options. Excluded from backups. |
+| `Library/Application Support/Engine/yt-dlp/versions/<name>/` | Installed yt-dlp updates (`yt_dlp/`, `yt_dlp_ejs/`), one folder each. |
+| `Library/Application Support/Engine/yt-dlp/current` | The name of the update folder to use. No file means the bundled yt-dlp. |
 | `Library/Application Support/Engine/staging/` | Scratch space while an update is installed. |
 | `Library/Application Support/Cookies/cookies.txt` | The imported cookies file, if any. |
 | `Library/Application Support/download-archive.txt` | The download archive. |
@@ -74,6 +77,16 @@ YTDLPGUI-iOS.app/
 The container path changes when iOS updates or reinstalls the app, so no absolute path is
 trusted across launches: option paths are re-resolved when a download is queued, and history
 entries whose absolute path has gone stale are re-rooted under the current Documents folder.
+
+Passwords, two-factor codes, proxy credentials and authorisation headers can be given in the
+custom arguments and the proxy field. They reach yt-dlp unchanged, but:
+
+- the command preview and each download's log show them as `PRIVATE`
+  (`ShellQuoting.redactingSecrets`, which follows yt-dlp's own `Config.hide_login_info`);
+- history entries and the last-used options (`UserDefaults`) are saved without them
+  (`DownloadOptions.removingSecrets`). A history entry records which options lost something
+  (`removedSecretOptions`), so *Download Again* and *Edit Options and Download* can say so;
+- `queue.json` keeps them, so interrupted downloads can resume, and is excluded from backups.
 
 ## Runtime and threading
 
@@ -130,7 +143,7 @@ tool: 0 success, 1 error, 101 cancelled.
 {"type": "postprocess", "status": "started|processing|finished", "postprocessor": "Merger", "filepath": "…"}
 {"type": "item", "id", "title", "uploader", "thumbnail", "duration", "webpage_url", "extractor",
  "playlist_index", "playlist_count"}
-{"type": "file", "path": "…"}
+{"type": "file", "path": "…", "main": true}
 ```
 
 - `log` messages are one line each, formatted exactly as the command-line tool would print them
@@ -138,7 +151,10 @@ tool: 0 success, 1 error, 101 cancelled.
   `ProgressParser` and `DownloadFailure.classify` work on them unchanged.
 - `progress` is throttled to five updates a second per job; `finished` and `error` always pass.
 - `item` is sent at yt-dlp's `pre_process` stage for every video, before any bytes move.
-- `file` is sent at `after_move` for every finished video, with its final path.
+- `file` is sent at `after_move` for every finished video, with its final path, and then for each
+  file kept beside it with `"main": false` (the audio of a pair AVFoundation couldn't merge). The
+  queue records every file (`DownloadItem.outputURLs`, `HistoryEntry.outputPaths`) and names the
+  download after the last main file, never after a kept companion. A missing `main` means `true`.
 
 ### Requests (Python → Swift, via `_ytdlpgui.request`)
 
@@ -155,6 +171,14 @@ that into a warning and keeps the original file rather than failing the download
 | `media.convert_image` | `input`, `output`, `format` (`jpg`\|`png`) | — |
 | `media.remove_ranges` | `input`, `output`, `ranges` [[start, end]] | — |
 | `media.probe` | `path` | `duration`, `tracks` [{kind, codec}], `readable` |
+
+`js.run` evaluates each script in a fresh JavaScriptCore virtual machine on a thread of its own.
+JavaScriptCore can't interrupt a script, so a run that times out is abandoned: the caller gets
+the error at once while the script finishes by itself. Abandoned runs still count towards a
+limit on runs going at once (`JavaScriptEvaluationSlots`: 2 plus one per two cores). A run that
+finds every slot taken waits for one within its own time limit, and otherwise answers with a
+"busy" error, which yt-dlp reports as an unsolved challenge. Abandoned runs are logged when they
+are given up and when they end.
 
 ## yt-dlp integration
 
@@ -241,14 +265,24 @@ The iOS app mirrors the macOS app's structure and names; each type is the iOS co
 the macOS one.
 
 - **`AppModel`** — composition root, in the SwiftUI environment. Owns everything below; tracks the
-  selected tab (`AppTab`: download, queue, history, settings); handles `ytdlpgui://` links, the
-  Share extension inbox, scene-phase changes and the clipboard suggestion.
+  selected tab (`AppTab`: download, queue, history, settings) and the queue item and history
+  entry being shown; handles `ytdlpgui://` links, the Share extension inbox, scene-phase changes
+  and the clipboard suggestion. A tap on a download notification goes through `openDownload`:
+  the queue item while the queue has it, otherwise the history entry whose `downloadID` matches,
+  since the queue forgets finished downloads when the app is relaunched or they're cleared.
+  The app runs in a single window on iPad too (`UIApplicationSupportsMultipleScenes` is `NO` in
+  `Info.plist`, with the generated scene manifest turned off): there is one `AppModel`, and a
+  second window would share its tab and navigation state.
 - **`EngineController`** — the counterpart of `Toolchain`: engine state (starting, ready, failed),
   versions, the capabilities used for argument building, and yt-dlp updates.
 - **`DownloadComposer`** — the Download screen: URL text, analysis, options, advisories, command
   preview, queueing.
 - **`DownloadQueue`** — runs `DownloadItem`s through `YTDLPEngine`, with a concurrency limit, and
-  handles completion: history, notifications, saving to Photos.
+  handles completion: history, notifications, saving to Photos. A link is queued only once at a
+  time: `enqueue` returns `.alreadyPending` for a link that is waiting or running, whichever
+  screen it came from, and retrying skips an item whose link is pending as another item. yt-dlp
+  names its temporary files after the video and doesn't lock them, so two jobs for one link would
+  write the same `.part` files.
 - **Services** — `AppSettings`, `NotificationService`, `MediaLibrary` (Photos), `CookieStore`,
   `StorageManager`, `BackgroundActivity` (continued processing and idle timer), `SharedLinkInbox`.
 
@@ -268,6 +302,8 @@ can be disabled (a setting), so the screen doesn't lock mid-download.
   `Inbox/<timestamp>-<uuid>.json`: `{"version": 1, "urls": [str], "kind": "video"|"audio"|null,
   "created": ISO-8601}`. When the app becomes active it drains the inbox: links with a `kind` are
   queued straight away with the last-used options; links without one are put in the URL field.
+  The format lives in `ShareInbox/ShareInboxFormat.swift`, a folder both targets compile, so the
+  writer (`InboxWriter`) and the reader (`SharedLinkInbox`) share one definition.
 - **URL scheme** — `ytdlpgui://download?url=<percent-encoded>&kind=video|audio` fills in the
   Download screen. It never starts a download by itself: a web page must not be able to.
 - **Shortcuts** — an App Intent, “Download with YTDLP GUI”, which the user configures explicitly
@@ -278,10 +314,30 @@ can be disabled (a setting), so the screen doesn't lock mid-download.
 Extractors break whenever sites change, so an app that could never update yt-dlp would stop
 working within weeks. Settings › Engine checks PyPI for the newest release; installing it
 downloads the yt-dlp wheel and the yt-dlp-ejs release that version expects, verifies both against
-the SHA-256 digests PyPI publishes, unpacks them into a staging folder, and swaps that into
-`Application Support/Engine/yt-dlp/`. The update takes effect at the next launch. If it ever fails
-to import, the engine falls back to the bundled copy and says so. “Use Bundled Version” deletes the
-update.
+the SHA-256 digests PyPI publishes, unpacks them into a staging folder, and moves that into a new
+folder, `Application Support/Engine/yt-dlp/versions/<UUID>/`. The app then writes that folder's
+name to `Engine/yt-dlp/current`. The update takes effect at the next launch. If it ever fails to
+import, the engine falls back to the bundled copy and says so. “Use Bundled Version” removes
+`current`.
+
+No update folder is changed or removed while the app runs. yt-dlp imports each extractor the
+first time a site is used, and the challenge solver reads its scripts on each use, both from the
+folder the interpreter started with. Replacing or deleting that folder mid-session would mix two
+yt-dlp versions or fail with `ModuleNotFoundError`. So the host refuses to install into a folder
+that exists, and folders nothing points at any more are deleted at the next launch, before Python
+starts (`EngineConfiguration.prepareUpdatesForLaunch`). That step also moves an update installed
+by an earlier build, which lived directly in `Engine/yt-dlp/`, into a folder of its own and keeps
+using it. Installing and reverting are therefore safe while downloads run.
+
+## Logging
+
+Everything the app logs goes to one subsystem, its bundle identifier
+(`io.github.ytdlpgui.YTDLPGUI.iOS`), through the loggers in `Shared/Utilities/AppLog.swift`, one
+category per area: `engine`, `javascript`, `media`, `queue`, `history`, `notifications`,
+`background`, `storage`, `cookies`, `share-inbox`. The queue logs each download's transitions
+(queued, started as job …, cancelled, interrupted, resumed, completed, failed) with its item and
+job IDs; links are private. To follow a device from a Mac:
+`log stream --device --predicate 'subsystem == "io.github.ytdlpgui.YTDLPGUI.iOS"' --level info`.
 
 ## Testing
 

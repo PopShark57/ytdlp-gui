@@ -24,7 +24,7 @@ struct QueueStore: Sendable {
 
     let fileURL: URL
 
-    private static let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI.iOS", category: "queue")
+    private static let logger = AppLog.queue
 
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultFileURL()
@@ -71,6 +71,13 @@ struct QueueStore: Sendable {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
             try encoder.encode(downloads).write(to: fileURL, options: .atomic)
+            // The saved options can hold passwords, which interrupted downloads need to resume.
+            // The file only matters until they finish, so it stays out of device backups. An
+            // atomic write replaces the file, which clears the flag, so it is set every time.
+            var savedURL = fileURL
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? savedURL.setResourceValues(values)
         } catch {
             Self.logger.error("Couldn't save the queue: \(error.localizedDescription, privacy: .public)")
         }

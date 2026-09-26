@@ -101,9 +101,10 @@ extension DownloadItem {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    /// The finished file's name and size.
+    /// The finished file's name and size, or how many files there are for a playlist.
     var completedFileLine: String? {
-        let parts = [outputURL?.lastPathComponent, Format.bytes(completedFileSize)].compactMap { $0 }
+        let files = outputURLs.count > 1 ? "\(outputURLs.count) files" : outputURL?.lastPathComponent
+        let parts = [files, Format.bytes(completedFileSize)].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -137,10 +138,10 @@ extension DownloadItem {
         return parts.joined(separator: ", ")
     }
 
-    /// The finished file, when it's still where the download left it.
-    var existingOutputURL: URL? {
-        guard state == .completed, let outputURL,
-              FileManager.default.fileExists(atPath: outputURL.path(percentEncoded: false)) else { return nil }
-        return outputURL
+    /// Every finished file still where the download left it, in the order they were finished.
+    var existingOutputURLs: [URL] {
+        guard state == .completed else { return [] }
+        let files = outputURLs.isEmpty ? outputURL.map { [$0] } ?? [] : outputURLs
+        return files.filter { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
     }
 }

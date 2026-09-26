@@ -5,7 +5,7 @@ import SwiftUI
 struct QueueView: View {
     @Environment(AppModel.self) private var model
 
-    @State private var quickLookURL: URL?
+    @State private var previewFiles: [URL] = []
     @State private var logItem: DownloadItem?
     @State private var confirmsRemoveAll = false
 
@@ -27,7 +27,7 @@ struct QueueView: View {
                 QueueItemDetailView(itemID: id)
             }
         }
-        .quickLookPreview($quickLookURL)
+        .quickLookFiles($previewFiles)
         .sheet(item: $logItem) { item in
             QueueLogSheet(item: item)
         }
@@ -88,7 +88,7 @@ struct QueueView: View {
             .contextMenu {
                 QueueItemMenuItems(
                     item: item,
-                    onOpen: { quickLookURL = $0 },
+                    onOpen: { previewFiles = $0 },
                     onShowLog: { logItem = item }
                 )
             }
@@ -115,7 +115,7 @@ struct QueueView: View {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button {
-                    queue.retryAllFailed()
+                    model.retryAllFailed()
                 } label: {
                     Label("Retry Failed", systemImage: "arrow.clockwise")
                 }

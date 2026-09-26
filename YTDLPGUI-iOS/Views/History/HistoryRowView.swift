@@ -3,6 +3,8 @@ import SwiftUI
 /// One finished or failed download in the history.
 struct HistoryRowView: View {
     let entry: HistoryEntry
+    /// From `HistoryStore.isFileMissing`, so drawing the row never touches the file system.
+    var isFileMissing = false
 
     var body: some View {
         ThumbnailRowLayout(thumbnailWidth: 80) {
@@ -24,7 +26,7 @@ struct HistoryRowView: View {
                     Label(entry.failureTitle ?? "Download failed", systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(.red)
-                } else if entry.isFileMissing {
+                } else if isFileMissing {
                     Label("File moved or deleted", systemImage: "questionmark.folder")
                         .font(.footnote)
                         .foregroundStyle(.orange)
@@ -34,7 +36,7 @@ struct HistoryRowView: View {
         .padding(.vertical, 3)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(entry.title)
-        .accessibilityValue(entry.accessibilityStatus)
+        .accessibilityValue(entry.accessibilityStatus(isFileMissing: isFileMissing))
     }
 }
 
@@ -46,17 +48,7 @@ extension HistoryEntry {
         return parts.joined(separator: " · ")
     }
 
-    /// A successful download whose file is no longer where it was saved.
-    var isFileMissing: Bool {
-        succeeded && !fileExists
-    }
-
-    /// The file, when it's still there to open or share.
-    var existingOutputURL: URL? {
-        fileExists ? outputURL : nil
-    }
-
-    var accessibilityStatus: String {
+    func accessibilityStatus(isFileMissing: Bool) -> String {
         var parts = [succeeded ? "Downloaded" : "Failed", summaryLine]
         if !succeeded, let failureTitle { parts.append(failureTitle) }
         if isFileMissing { parts.append("File moved or deleted") }

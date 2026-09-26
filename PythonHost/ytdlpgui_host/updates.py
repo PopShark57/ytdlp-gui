@@ -3,9 +3,13 @@
 Extractors break whenever sites change, so the app has to be able to update yt-dlp between app
 releases. An update is two wheels: yt-dlp, and the yt-dlp-ejs release it declares it needs for
 YouTube's JavaScript challenges. Both are checked against the SHA-256 digests PyPI publishes,
-only their package folders are unpacked, and the result replaces the previous update in one
-rename. The update takes effect at the next launch: a running interpreter can't swap out a
-package it has already imported.
+only their package folders are unpacked, and the result is moved into place in one rename.
+
+Each update goes into a new folder, which the app names and then points the next launch at. An
+existing folder is never replaced: yt-dlp imports most of its code lazily (every extractor, and
+the challenge solver's scripts are read on each use), so the folder the running interpreter
+started from must stay exactly as it was until the app quits. That is also why an update takes
+effect only at the next launch.
 
 Only the two folders the app passes in are written to.
 """
@@ -57,9 +61,13 @@ def check_update(_payload):
 
 
 def install_update(payload):
-    """The `install_update` command: downloads, verifies and installs the newest yt-dlp."""
+    """The `install_update` command: downloads, verifies and installs the newest yt-dlp.
+
+    `update_dir` must not exist yet; the update is moved there once it has been verified.
+    """
     staging_dir = _directory(payload, 'staging_dir')
     update_dir = _directory(payload, 'update_dir')
+    _check_new_directory(update_dir)
     os.makedirs(staging_dir, exist_ok=True)
     work_dir = os.path.join(staging_dir, uuid.uuid4().hex)
     os.makedirs(work_dir)
@@ -76,7 +84,7 @@ def install_update(payload):
         for wheel in (yt_dlp_wheel, ejs_wheel):
             _unpack_packages(wheel, unpacked)
         _check_unpacked(unpacked, version)
-        _replace_directory(update_dir, unpacked, work_dir)
+        _move_into_place(unpacked, update_dir)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
     return {'ok': True, 'version': version}
@@ -247,19 +255,21 @@ def _string_constant(source, name):
     return None
 
 
-# MARK: - Swapping
+# MARK: - Putting it in place
 
-def _replace_directory(update_dir, unpacked, work_dir):
-    """Makes `unpacked` the new `update_dir`, keeping the old one until the new one is in place."""
-    os.makedirs(os.path.dirname(update_dir), exist_ok=True)
-    previous = None
+def _check_new_directory(update_dir):
     if os.path.lexists(update_dir):
-        previous = os.path.join(work_dir, 'previous')
-        os.rename(update_dir, previous)
+        raise UpdateError(
+            'The folder for the update already exists, and an existing yt-dlp is never replaced '
+            'while the app runs.')
+
+
+def _move_into_place(unpacked, update_dir):
+    """Makes `unpacked` the new `update_dir`, which must not exist: nothing is replaced or deleted."""
+    os.makedirs(os.path.dirname(update_dir), exist_ok=True)
+    # Checked again: the download took a while. `os.rename` would quietly replace an empty folder.
+    _check_new_directory(update_dir)
     try:
         os.rename(unpacked, update_dir)
     except OSError as error:
-        if previous is not None:
-            os.rename(previous, update_dir)
         raise UpdateError(f"The update couldn't be put in place: {error.strerror or error}.") from None
-    # `previous` lives inside `work_dir`, which the caller deletes.

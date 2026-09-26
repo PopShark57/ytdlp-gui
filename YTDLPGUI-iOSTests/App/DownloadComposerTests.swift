@@ -36,12 +36,12 @@ struct DownloadComposerTests {
         #expect(composer.canAnalyze)
 
         composer.setURLText("no links here", analyzeIfEnabled: true)
-        #expect(composer.statusMessage == "No web address was found in that text.")
+        #expect(env.status.message == "No web address was found in that text.")
         #expect(!composer.hasValidURL)
 
         composer.clear()
         #expect(composer.urlText.isEmpty)
-        #expect(composer.statusMessage == nil)
+        #expect(env.status.message == nil)
     }
 
     @Test("Nothing can be analysed or downloaded until the engine is ready")
@@ -209,6 +209,24 @@ struct DownloadComposerTests {
         #expect(composer.commandPreview.contains("--cookies " + ShellQuoting.quote(env.cookies.storedFileURL.path(percentEncoded: false))))
     }
 
+    @Test("The command preview masks credentials")
+    func commandPreviewRedactsSecrets() async throws {
+        let env = try await readyEnvironment()
+        let composer = env.composer
+        composer.setURLText(url, analyzeIfEnabled: false)
+        composer.options.customArguments = "--password s3cret -2 123456"
+        composer.options.proxy = "socks5://user:pass@proxy.test:1080"
+
+        let preview = composer.commandPreview
+        #expect(!preview.contains("s3cret"))
+        #expect(!preview.contains("123456"))
+        #expect(!preview.contains("user:pass"))
+        #expect(preview.contains("--password PRIVATE"))
+        #expect(preview.contains("socks5://PRIVATE@proxy.test:1080"))
+        // Only the display is masked.
+        #expect(composer.options.customArguments == "--password s3cret -2 123456")
+    }
+
     @Test("Queued options carry this install's paths; the composer's own options don't")
     func optionNormalisation() async throws {
         let env = try await readyEnvironment()
@@ -231,7 +249,28 @@ struct DownloadComposerTests {
         #expect(composer.options.audioFormat == .opus)
         #expect(env.settings.storedOptions.cookieFilePath.isEmpty)
         #expect(composer.urlText.isEmpty)
-        #expect(composer.statusMessage == "Added 1 download to the queue.")
+        #expect(env.status.message == "Added 1 download to the queue.")
+    }
+
+    @Test("An analysed link that is already queued isn't queued again, and stays in the field")
+    func duplicateAnalysedLink() async throws {
+        let env = try await readyEnvironment()
+        let composer = env.composer
+        env.analyzer.respond(with: .success(SampleInfo.video(url: url)))
+        composer.setURLText(url, analyzeIfEnabled: true)
+        try await waitUntil("analysis") { composer.analysis.info != nil }
+        #expect(composer.startDownload())
+        #expect(env.status.message == "Added “Sample Clip” to the queue.")
+        _ = try await waitForJobs(1, on: env.downloader)
+
+        composer.setURLText(url, analyzeIfEnabled: true)
+        try await waitUntil("second analysis") { composer.analysis.info != nil }
+        #expect(!composer.startDownload())
+        #expect(env.status.message == "That link is already in the queue.")
+        #expect(composer.urlText == url)
+        #expect(env.queue.items.count == 1)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(env.downloader.jobs.count == 1)
     }
 
     @Test("Custom arguments the engine refuses block downloading")
@@ -245,7 +284,7 @@ struct DownloadComposerTests {
         #expect(!composer.canDownload)
         #expect(!composer.canAnalyze)
         #expect(!composer.startDownload())
-        #expect(composer.statusMessage == composer.customArgumentBlockMessage)
+        #expect(env.status.message == composer.customArgumentBlockMessage)
         #expect(env.queue.items.isEmpty)
         #expect(!composer.commandPreview.contains("--js-runtimes"))
     }
@@ -303,7 +342,9 @@ struct DownloadComposerTests {
             queue: env.queue,
             storage: env.storage,
             cookies: env.cookies,
-            analyzer: env.analyzer
+            resolver: env.resolver,
+            analyzer: env.analyzer,
+            status: env.status
         )
         #expect(composer.options.kind == .audio)
         #expect(composer.options.cookieFilePath.isEmpty)

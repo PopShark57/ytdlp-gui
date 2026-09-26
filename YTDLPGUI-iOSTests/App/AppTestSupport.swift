@@ -69,7 +69,7 @@ final class FakeAnalysisEngine: AnalysisEngine {
     }
 
     private struct State {
-        var outcome: Outcome = .failure(.notStarted)
+        var outcome: Outcome = .failure(.hostFailure(message: "The test didn't say how analysis should answer.", traceback: nil))
         var log: [String] = []
         var calls: [[String]] = []
         var cancelledJobIDs: [UUID] = []
@@ -122,6 +122,9 @@ final class FakeEngineRuntime: EngineRuntime {
         var startError: EngineError?
         var startCount = 0
         var restartRequired = false
+        var latestVersion = "2026.9.1"
+        var installDelay: Duration = .zero
+        var installCount = 0
     }
 
     private let state = Mutex(State())
@@ -131,6 +134,18 @@ final class FakeEngineRuntime: EngineRuntime {
     }
 
     var startCount: Int { state.withLock { $0.startCount } }
+
+    /// The newest release the update check reports; the running one is `info.ytdlpVersion`.
+    func offerUpdate(_ version: String) {
+        state.withLock { $0.latestVersion = version }
+    }
+
+    /// How long an install takes, to catch the controller while it is installing.
+    func delayInstalls(by delay: Duration) {
+        state.withLock { $0.installDelay = delay }
+    }
+
+    var installCount: Int { state.withLock { $0.installCount } }
 
     func start() async throws -> EngineInfo {
         let error = state.withLock { state -> EngineError? in
@@ -144,12 +159,19 @@ final class FakeEngineRuntime: EngineRuntime {
     var isRestartRequired: Bool { state.withLock { $0.restartRequired } }
 
     func checkForUpdate() async throws -> EngineUpdateInfo {
-        EngineUpdateInfo(currentVersion: "2026.8.19", latestVersion: "2026.9.1", isNewer: true)
+        let latest = state.withLock { $0.latestVersion }
+        let current = Self.info.ytdlpVersion
+        return EngineUpdateInfo(currentVersion: current, latestVersion: latest, isNewer: latest > current)
     }
 
     func installLatestUpdate() async throws -> String {
+        let (delay, latest) = state.withLock { state in
+            state.installCount += 1
+            return (state.installDelay, state.latestVersion)
+        }
+        if delay > .zero { try await Task.sleep(for: delay) }
         state.withLock { $0.restartRequired = true }
-        return "2026.9.1"
+        return latest
     }
 
     func revertToBundledVersion() throws {
@@ -189,6 +211,7 @@ final class AppTestEnvironment {
     let analyzer = FakeAnalysisEngine()
     let runtime = FakeEngineRuntime()
     let clipboard = FakeClipboard()
+    let status = StatusCenter()
     var sharedLinks: [SharedLink] = []
 
     let settings: AppSettings
@@ -198,6 +221,7 @@ final class AppTestEnvironment {
     let notifications: NotificationService
     let library: MediaLibrary
     let engine: EngineController
+    let resolver: DownloadOptionsResolver
     let queueStoreURL: URL
     private(set) var queue: DownloadQueue
     private(set) var composer: DownloadComposer
@@ -226,6 +250,7 @@ final class AppTestEnvironment {
         notifications = NotificationService()
         library = MediaLibrary()
         engine = EngineController(runtime: runtime, temporaryDirectory: storage.partialDownloadsDirectory)
+        resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
         queueStoreURL = applicationSupport.appending(path: "YTDLPGUI/queue.json")
 
         let queue = DownloadQueue(
@@ -235,8 +260,7 @@ final class AppTestEnvironment {
             history: history,
             notifications: notifications,
             library: library,
-            storage: storage,
-            cookies: cookies,
+            resolver: resolver,
             store: QueueStore(fileURL: queueStoreURL)
         )
         self.queue = queue
@@ -246,7 +270,9 @@ final class AppTestEnvironment {
             queue: queue,
             storage: storage,
             cookies: cookies,
-            analyzer: analyzer
+            resolver: resolver,
+            analyzer: analyzer,
+            status: status
         )
     }
 
@@ -264,8 +290,7 @@ final class AppTestEnvironment {
             history: history,
             notifications: notifications,
             library: library,
-            storage: storage,
-            cookies: cookies,
+            resolver: resolver,
             store: QueueStore(fileURL: queueStoreURL)
         )
     }
@@ -282,6 +307,7 @@ final class AppTestEnvironment {
             queue: queue,
             composer: composer,
             background: BackgroundActivity(settings: settings, setIdleTimerDisabled: { _ in }, requestsBackgroundTime: false),
+            status: status,
             clipboard: clipboard,
             drainSharedInbox: { [weak self] in
                 let links = self?.sharedLinks ?? []

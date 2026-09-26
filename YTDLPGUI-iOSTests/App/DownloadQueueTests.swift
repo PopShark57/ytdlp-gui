@@ -13,7 +13,7 @@ struct DownloadQueueTests {
     @Test("A download moves through its phases and records the finished file")
     func progressPhasesAndCompletion() async throws {
         let env = try AppTestEnvironment()
-        let item = env.queue.enqueue(url: url, options: DownloadOptions())
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
         #expect(item.state == .active)
         #expect(item.phase == .resolving)
@@ -77,7 +77,7 @@ struct DownloadQueueTests {
         options.cookieFilePath = "/var/mobile/Containers/Data/Application/OLD/cookies.txt"
         options.customArguments = "--embed-subs --update"
 
-        let item = env.queue.enqueue(url: url, options: options)
+        let item = env.queue.enqueue(url: url, options: options).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
 
         let documents = env.storage.downloadsDirectory.path(percentEncoded: false)
@@ -94,12 +94,58 @@ struct DownloadQueueTests {
         #expect(item.options.outputDirectory == env.storage.downloadsDirectory)
     }
 
+    @Test("The log masks credentials, while the engine gets the real ones")
+    func logRedactsSecrets() async throws {
+        let env = try AppTestEnvironment()
+        var options = DownloadOptions()
+        options.customArguments = "--password s3cret --proxy http://u:p@h:1 --no-mtime"
+        let item = env.queue.enqueue(url: url, options: options).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        #expect(job.argv.contains("s3cret"))
+        #expect(job.argv.contains("http://u:p@h:1"))
+        let commandLine = try #require(item.log.lines.first)
+        #expect(commandLine.hasPrefix("$ yt-dlp "))
+        #expect(!commandLine.contains("s3cret"))
+        #expect(!commandLine.contains("u:p"))
+        #expect(commandLine.contains("--password PRIVATE"))
+        #expect(commandLine.contains("http://PRIVATE@h:1"))
+    }
+
+    @Test("History doesn't keep credentials; the saved queue does, out of backups")
+    func secretsStayOutOfHistory() async throws {
+        let env = try AppTestEnvironment()
+        env.settings.maximumConcurrentDownloads = 1
+        var options = DownloadOptions()
+        options.customArguments = "--password s3cret --no-mtime"
+        options.proxy = "http://user:pass@proxy.test:3128"
+        let item = env.queue.enqueue(url: url, options: options).item
+        let waiting = env.queue.enqueue(url: "https://example.com/b", options: options).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        // The waiting download needs its password to run after a relaunch.
+        env.queue.flushPersistence()
+        let saved = try #require(QueueStore(fileURL: env.queueStoreURL).load().first { $0.id == waiting.id })
+        #expect(saved.options.customArguments.contains("s3cret"))
+        let values = try env.queueStoreURL.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        #expect(values.isExcludedFromBackup == true)
+
+        job.succeed()
+        try await waitUntil("completion") { item.state == .completed }
+        let entry = try #require(env.history.entries.first)
+        #expect(entry.options?.customArguments == "--no-mtime")
+        #expect(entry.options?.proxy == "http://proxy.test:3128")
+        #expect(entry.removedSecretOptions == ["--password", "--proxy"])
+        // The finished item itself still has them, for a retry.
+        #expect(item.options.customArguments.contains("s3cret"))
+    }
+
     @Test("Playlist items update the position, and each finished file counts once")
     func playlistEvents() async throws {
         let env = try AppTestEnvironment()
         var options = DownloadOptions()
         options.downloadPlaylist = true
-        let item = env.queue.enqueue(url: "https://www.youtube.com/playlist?list=PL1", options: options)
+        let item = env.queue.enqueue(url: "https://www.youtube.com/playlist?list=PL1", options: options).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
 
         job.send(.item(EngineItemInfo(title: "First video", uploader: "Channel", playlistIndex: 1, playlistCount: 3)))
@@ -123,12 +169,134 @@ struct DownloadQueueTests {
         #expect(item.displayTitle == "https://www.youtube.com/playlist?list=PL1")
     }
 
+    @Test("Every file of a multi-file download is recorded, in queue and history")
+    func multiFileResults() async throws {
+        let env = try AppTestEnvironment()
+        var options = DownloadOptions()
+        options.downloadPlaylist = true
+        let item = env.queue.enqueue(url: "https://www.youtube.com/playlist?list=PL1", options: options).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        let files = try ["1 - First.mp4", "2 - Second.mp4", "3 - Third.mp4"].enumerated().map { index, name in
+            try env.makeDownloadedFile(named: name, bytes: 1_000 * (index + 1))
+        }
+        for file in files {
+            job.send(.file(path: file.path(percentEncoded: false)))
+        }
+        job.succeed(files: files.map { $0.path(percentEncoded: false) })
+        try await waitUntil("completion") { item.state == .completed }
+
+        #expect(item.outputURLs.map(\.standardizedFileURL) == files.map(\.standardizedFileURL))
+        // The last video stands for the playlist.
+        #expect(item.outputURL?.standardizedFileURL == files[2].standardizedFileURL)
+        #expect(item.completedFileSize == 6_000)
+        #expect(item.completedItemCount == 3)
+
+        let entry = try #require(env.history.entries.first)
+        #expect(entry.outputPaths == files.map { $0.path(percentEncoded: false) })
+        #expect(entry.fileSizeBytes == 6_000)
+        #expect(entry.outputURLs.map(\.standardizedFileURL) == files.map(\.standardizedFileURL))
+        try await waitUntil("file status") { env.history.fileStatus[entry.id] != nil }
+        #expect(env.history.existingFiles(of: entry).count == 3)
+        #expect(!env.history.isFileMissing(entry))
+
+        // One file gone isn't the entry's files gone.
+        try FileManager.default.removeItem(at: files[0])
+        env.history.refreshFileStatus()
+        try await waitUntil("refreshed file status") { env.history.existingFiles(of: entry).count == 2 }
+        #expect(!env.history.isFileMissing(entry))
+        #expect(env.history.fileStatus[entry.id]?.missingCount == 1)
+        #expect(MissingFiles.warning(missing: 1, of: 3) == "1 of 3 files have been moved or deleted.")
+    }
+
+    @Test("History finds every file of an entry after the app's container moved")
+    func outputURLsAreReRooted() async throws {
+        let env = try AppTestEnvironment()
+        let documents = try #require(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first)
+        let folder = "YTDLPGUITests-\(UUID().uuidString)"
+        let directory = documents.appending(path: folder, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["1.mp4", "2.mp4"] {
+            try Data("clip".utf8).write(to: directory.appending(path: name))
+        }
+
+        let stale = "/var/mobile/Containers/Data/Application/OLD-INSTALL/Documents/\(folder)"
+        let entry = HistoryEntry(
+            title: "Playlist",
+            sourceURL: url,
+            outputPath: "\(stale)/2.mp4",
+            outputPaths: ["\(stale)/1.mp4", "\(stale)/2.mp4"],
+            formatSummary: "Best",
+            kind: .video,
+            succeeded: true
+        )
+        #expect(entry.outputURLs.map { $0.path(percentEncoded: false) } == [
+            directory.appending(path: "1.mp4").path(percentEncoded: false),
+            directory.appending(path: "2.mp4").path(percentEncoded: false),
+        ])
+        env.history.add(entry)
+        try await waitUntil("file status") { env.history.fileStatus[entry.id] != nil }
+        #expect(env.history.existingFiles(of: entry).count == 2)
+        #expect(!env.history.isFileMissing(entry))
+    }
+
+    @Test("A video whose audio was kept beside it is named by the video, not the audio")
+    func keptSeparateVideo() async throws {
+        let env = try AppTestEnvironment()
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        let video = try env.makeDownloadedFile(named: "clip.mp4", bytes: 3_000)
+        let audio = try env.makeDownloadedFile(named: "clip.m4a", bytes: 1_000)
+        job.send(.file(path: video.path(percentEncoded: false), isMain: true))
+        job.send(.file(path: audio.path(percentEncoded: false), isMain: false))
+        job.succeed(files: [video.path(percentEncoded: false), audio.path(percentEncoded: false)])
+        try await waitUntil("completion") { item.state == .completed }
+
+        #expect(item.outputURL?.standardizedFileURL == video.standardizedFileURL)
+        #expect(item.outputURLs.count == 2)
+        #expect(item.completedFileSize == 4_000)
+        // One video, even though two files arrived.
+        #expect(item.completedItemCount == 1)
+        let entry = try #require(env.history.entries.first)
+        #expect(entry.outputPath == video.path(percentEncoded: false))
+        #expect(entry.fileName == "clip.mp4")
+    }
+
+    @Test("Without file events, the first file the job listed stands for the download")
+    func mainFileWithoutEvents() async throws {
+        let env = try AppTestEnvironment()
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+        let video = try env.makeDownloadedFile(named: "clip.mp4")
+        let audio = try env.makeDownloadedFile(named: "clip.m4a")
+        job.succeed(files: [video.path(percentEncoded: false), audio.path(percentEncoded: false)])
+        try await waitUntil("completion") { item.state == .completed }
+        #expect(item.outputURL?.standardizedFileURL == video.standardizedFileURL)
+    }
+
+    @Test("Photos eligibility is worked out once the download completes; audio never qualifies")
+    func photoEligibility() async throws {
+        let env = try AppTestEnvironment()
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+        let song = try env.makeDownloadedFile(named: "song.m4a")
+        job.send(.file(path: song.path(percentEncoded: false)))
+        job.succeed(files: [song.path(percentEncoded: false)])
+        try await waitUntil("completion") { item.state == .completed }
+
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!env.queue.canSaveToPhotos(item))
+        #expect(env.queue.photoSaveState(for: item) == .notSaved)
+    }
+
     // MARK: - Failures
 
     @Test("A failed download is classified from its log")
     func failureClassification() async throws {
         let env = try AppTestEnvironment()
-        let item = env.queue.enqueue(url: url, options: DownloadOptions())
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
 
         job.send(.log(.error, "ERROR: [youtube] abc123: Video unavailable. This video has been removed by the uploader"))
@@ -145,19 +313,21 @@ struct DownloadQueueTests {
     @Test("A host error becomes an unknown failure carrying its message")
     func hostError() async throws {
         let env = try AppTestEnvironment()
-        let item = env.queue.enqueue(url: url, options: DownloadOptions())
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
 
         job.fail(exitCode: 1, hostError: "The host couldn't parse the arguments.")
         try await waitUntil("failure") { item.state == .failed }
         #expect(item.failure == DownloadFailure(kind: .unknown, underlyingMessage: "The host couldn't parse the arguments."))
+        // The log, which people share, says why too.
+        #expect(item.log.lines.last == "ERROR: The host couldn't parse the arguments.")
     }
 
     @Test("A download fails clearly when the engine can't start")
     func engineStartFailure() async throws {
         let env = try AppTestEnvironment()
         env.runtime.failStarts(with: .startupFailed("Python couldn't be found."))
-        let item = env.queue.enqueue(url: url, options: DownloadOptions())
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
 
         try await waitUntil("failure") { item.state == .failed }
         #expect(item.failure?.kind == .unknown)
@@ -170,7 +340,7 @@ struct DownloadQueueTests {
     @Test("Cancelling a running download stops its job")
     func cancelActive() async throws {
         let env = try AppTestEnvironment()
-        let item = env.queue.enqueue(url: url, options: DownloadOptions())
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
 
         env.queue.cancel(item)
@@ -185,8 +355,8 @@ struct DownloadQueueTests {
     func cancelQueued() async throws {
         let env = try AppTestEnvironment()
         env.settings.maximumConcurrentDownloads = 1
-        _ = env.queue.enqueue(url: url, options: DownloadOptions())
-        let waiting = env.queue.enqueue(url: "https://example.com/second", options: DownloadOptions())
+        _ = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let waiting = env.queue.enqueue(url: "https://example.com/second", options: DownloadOptions()).item
         _ = try await waitForJobs(1, on: env.downloader)
         #expect(waiting.state == .queued)
 
@@ -199,7 +369,7 @@ struct DownloadQueueTests {
     @Test("Retrying a failed download runs it again from scratch")
     func retry() async throws {
         let env = try AppTestEnvironment()
-        let item = env.queue.enqueue(url: url, options: DownloadOptions())
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
         let first = try #require(try await waitForJobs(1, on: env.downloader).first)
         first.send(.log(.error, "ERROR: Unable to download webpage: timed out"))
         first.fail()
@@ -221,7 +391,7 @@ struct DownloadQueueTests {
         let env = try AppTestEnvironment()
         env.settings.maximumConcurrentDownloads = 2
         let items = ["a", "b", "c"].map {
-            env.queue.enqueue(url: "https://example.com/\($0)", options: DownloadOptions())
+            env.queue.enqueue(url: "https://example.com/\($0)", options: DownloadOptions()).item
         }
         let jobs = try await waitForJobs(2, on: env.downloader)
         try await Task.sleep(for: .milliseconds(50))
@@ -238,8 +408,8 @@ struct DownloadQueueTests {
     func raisingTheLimitStartsMore() async throws {
         let env = try AppTestEnvironment()
         env.settings.maximumConcurrentDownloads = 1
-        _ = env.queue.enqueue(url: "https://example.com/a", options: DownloadOptions())
-        let second = env.queue.enqueue(url: "https://example.com/b", options: DownloadOptions())
+        _ = env.queue.enqueue(url: "https://example.com/a", options: DownloadOptions()).item
+        let second = env.queue.enqueue(url: "https://example.com/b", options: DownloadOptions()).item
         _ = try await waitForJobs(1, on: env.downloader)
         #expect(second.state == .queued)
 
@@ -257,10 +427,97 @@ struct DownloadQueueTests {
         #expect(env.queue.enqueue(urls: [url], options: DownloadOptions()).isEmpty)
     }
 
+    @Test("A link that is waiting or running can't be queued a second time")
+    func duplicateLinkIsRefused() async throws {
+        let env = try AppTestEnvironment()
+        env.settings.maximumConcurrentDownloads = 2
+        let first = env.queue.enqueue(url: url, options: DownloadOptions())
+        #expect(first.addedItem != nil)
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        // Different options, and stray whitespace, are still the same link.
+        var audio = DownloadOptions()
+        audio.kind = .audio
+        let second = env.queue.enqueue(url: " \(url)\n", options: audio)
+        #expect(second.addedItem == nil)
+        #expect(second.item.id == first.item.id)
+        #expect(env.queue.pendingItem(forURL: url)?.id == first.item.id)
+        #expect(env.queue.items.count == 1)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(env.downloader.jobs.count == 1)
+
+        // Once the first has finished the link can be queued again.
+        job.succeed()
+        try await waitUntil("completion") { first.item.state == .completed }
+        #expect(env.queue.pendingItem(forURL: url) == nil)
+        #expect(env.queue.enqueue(url: url, options: DownloadOptions()).addedItem != nil)
+        _ = try await waitForJobs(2, on: env.downloader)
+    }
+
+    @Test("Retrying is refused while another item for the same link is pending")
+    func retryWhileLinkIsPending() async throws {
+        let env = try AppTestEnvironment()
+        let failed = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let firstJob = try #require(try await waitForJobs(1, on: env.downloader).first)
+        firstJob.fail()
+        try await waitUntil("failure") { failed.state == .failed }
+
+        let running = try #require(env.queue.enqueue(url: url, options: DownloadOptions()).addedItem)
+        _ = try await waitForJobs(2, on: env.downloader)
+
+        #expect(env.queue.retry(failed)?.id == running.id)
+        #expect(failed.state == .failed)
+        #expect(env.queue.retryAllFailed() == 1)
+        #expect(failed.state == .failed)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(env.downloader.jobs.count == 2)
+    }
+
+    @Test("Retry All retries two failed items for one link only once")
+    func retryAllFailedDeduplicates() async throws {
+        let env = try AppTestEnvironment()
+        let first = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let firstJob = try #require(try await waitForJobs(1, on: env.downloader).first)
+        firstJob.fail()
+        try await waitUntil("first failure") { first.state == .failed }
+        let second = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        #expect(second.id != first.id)
+        let secondJob = try #require(try await waitForJobs(2, on: env.downloader).last)
+        secondJob.fail()
+        try await waitUntil("second failure") { second.state == .failed }
+
+        #expect(env.queue.retryAllFailed() == 1)
+        #expect(first.state != .failed)
+        #expect(second.state == .failed)
+        _ = try await waitForJobs(3, on: env.downloader)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(env.downloader.jobs.count == 3)
+    }
+
+    @Test("A queued item waits while another item for its link is running")
+    func sameLinkNeverRunsTwice() async throws {
+        let env = try AppTestEnvironment()
+        env.settings.maximumConcurrentDownloads = 2
+        let running = env.queue.enqueue(url: "https://example.com/a", options: DownloadOptions()).item
+        _ = try await waitForJobs(1, on: env.downloader)
+
+        // An interruption leaves the running item cancelled; a new item for the same link can
+        // then be queued, and resuming must not run both at once.
+        env.queue.interruptActiveDownloads()
+        try await waitUntil("interrupted") { running.state == .cancelled }
+        let second = try #require(env.queue.enqueue(url: "https://example.com/a", options: DownloadOptions()).addedItem)
+        env.queue.resumeInterruptedDownloads()
+        _ = try await waitForJobs(2, on: env.downloader)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(env.downloader.jobs.count == 2)
+        #expect([running.state, second.state].filter { $0 == .active }.count == 1)
+        #expect([running.state, second.state].filter { $0 == .queued }.count == 1)
+    }
+
     @Test("Removing a running download stops it without recording it")
     func removeActive() async throws {
         let env = try AppTestEnvironment()
-        let item = env.queue.enqueue(url: url, options: DownloadOptions())
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
 
         env.queue.remove(item)
@@ -273,8 +530,8 @@ struct DownloadQueueTests {
     @Test("Aggregate progress averages the running downloads")
     func aggregateProgress() async throws {
         let env = try AppTestEnvironment()
-        _ = env.queue.enqueue(url: "https://example.com/a", options: DownloadOptions())
-        _ = env.queue.enqueue(url: "https://example.com/b", options: DownloadOptions())
+        _ = env.queue.enqueue(url: "https://example.com/a", options: DownloadOptions()).item
+        _ = env.queue.enqueue(url: "https://example.com/b", options: DownloadOptions()).item
         let jobs = try await waitForJobs(2, on: env.downloader)
         #expect(env.queue.aggregateProgress == nil)
 
@@ -291,8 +548,8 @@ struct DownloadQueueTests {
     func interruptAndResume() async throws {
         let env = try AppTestEnvironment()
         env.settings.maximumConcurrentDownloads = 1
-        let running = env.queue.enqueue(url: "https://example.com/a", options: DownloadOptions())
-        let waiting = env.queue.enqueue(url: "https://example.com/b", options: DownloadOptions())
+        let running = env.queue.enqueue(url: "https://example.com/a", options: DownloadOptions()).item
+        let waiting = env.queue.enqueue(url: "https://example.com/b", options: DownloadOptions()).item
         _ = try await waitForJobs(1, on: env.downloader)
 
         env.queue.interruptActiveDownloads()
@@ -315,8 +572,8 @@ struct DownloadQueueTests {
         var options = DownloadOptions()
         options.kind = .audio
         options.audioFormat = .flac
-        let running = env.queue.enqueue(url: "https://example.com/a", options: options)
-        let waiting = env.queue.enqueue(url: "https://example.com/b", options: DownloadOptions())
+        let running = env.queue.enqueue(url: "https://example.com/a", options: options).item
+        let waiting = env.queue.enqueue(url: "https://example.com/b", options: DownloadOptions()).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
         job.send(.item(EngineItemInfo(title: "Song", uploader: "Band", durationSeconds: 200)))
         try await waitUntil("title") { running.title == "Song" }
@@ -352,7 +609,7 @@ struct DownloadQueueTests {
     @Test("Finished downloads are not remembered as unfinished")
     func finishedItemsAreNotPersisted() async throws {
         let env = try AppTestEnvironment()
-        let item = env.queue.enqueue(url: url, options: DownloadOptions())
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
         job.succeed()
         try await waitUntil("completion") { item.state == .completed }

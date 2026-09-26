@@ -864,22 +864,24 @@ Only migrations with a concrete payoff are listed. The codebase already uses cur
 
 ## Final Review Checklist
 
-- [ ] Installing a second yt-dlp update, or choosing *Use Bundled Version*, never renames or deletes the folder the running engine imported. A download of a not-yet-used site still works in the same session.
-- [ ] Old update folders are removed at the next launch. A legacy flat update folder is migrated and still used.
-- [ ] A link that is waiting or running can't be queued again from the composer, *Download Again* or *Retry*. The person is told and shown the existing item.
-- [ ] *Edit Options and Download* calls `AppModel.loadIntoComposer`, and the inline copy is gone. Refused arguments are removed with a message, and an entry without options loads its own kind.
-- [ ] Tapping a completion notification after a relaunch or after *Clear Finished* opens that download's History entry, not "Download Removed".
-- [ ] A playlist's history entry lists, shares and saves to Photos all of its files, and its size matches the files it lists.
-- [ ] When video and audio are kept separately, the queue row and history entry name the video file, not the audio.
-- [ ] The command preview and every download log show `PRIVATE` for passwords, the two-factor code, the client certificate password, proxy credentials and auth headers. The engine still receives the real values.
-- [ ] A decision on persisting secret-bearing options is recorded and implemented. `queue.json` is excluded from backup.
-- [ ] Abandoned JavaScript solver runs are capped and logged.
-- [ ] The History tab does no per-row file-system work in view bodies. Queue and History views do no synchronous Photos-compatibility checks.
-- [ ] One logging subsystem is used throughout, and queue transitions are logged with item and job IDs.
-- [ ] Host errors appear in the download's log.
-- [ ] `history.json` files written before this change still decode, and the macOS target builds and passes its tests.
-- [ ] The new tests listed in *Testing Recommendations* exist and pass: Python host suite, iOS unit tests on device, macOS suite.
-- [ ] `Docs/iOS-Architecture.md` reflects the new update layout and the `HistoryEntry` fields.
+Status 2026-09-26: ticked items are implemented on `claude/vigilant-ritchie-nmba4d`. The Python host suite passes there, but no Swift was compiled or run (no Xcode in that environment). See `Continuation.md` for what to verify on a Mac and a device.
+
+- [x] Installing a second yt-dlp update, or choosing *Use Bundled Version*, never renames or deletes the folder the running engine imported. A download of a not-yet-used site still works in the same session.
+- [x] Old update folders are removed at the next launch. A legacy flat update folder is migrated and still used.
+- [x] A link that is waiting or running can't be queued again from the composer, *Download Again* or *Retry*. The person is told and shown the existing item.
+- [x] *Edit Options and Download* calls `AppModel.loadIntoComposer`, and the inline copy is gone. Refused arguments are removed with a message, and an entry without options loads its own kind.
+- [x] Tapping a completion notification after a relaunch or after *Clear Finished* opens that download's History entry, not "Download Removed".
+- [x] A playlist's history entry lists, shares and saves to Photos all of its files, and its size matches the files it lists.
+- [x] When video and audio are kept separately, the queue row and history entry name the video file, not the audio.
+- [x] The command preview and every download log show `PRIVATE` for passwords, the two-factor code, the client certificate password, proxy credentials and auth headers. The engine still receives the real values.
+- [x] A decision on persisting secret-bearing options is recorded and implemented. `queue.json` is excluded from backup.
+- [x] Abandoned JavaScript solver runs are capped and logged.
+- [x] The History tab does no per-row file-system work in view bodies. Queue and History views do no synchronous Photos-compatibility checks.
+- [x] One logging subsystem is used throughout, and queue transitions are logged with item and job IDs.
+- [x] Host errors appear in the download's log.
+- [ ] `history.json` files written before this change still decode, and the macOS target builds and passes its tests. *(Decoding test added; not yet run.)*
+- [ ] The new tests listed in *Testing Recommendations* exist and pass: Python host suite, iOS unit tests on device, macOS suite. *(All exist; the Python host suite passes; the iOS and macOS suites haven't been run yet.)*
+- [x] `Docs/iOS-Architecture.md` reflects the new update layout and the `HistoryEntry` fields.
 
 ---
 

@@ -174,4 +174,53 @@ struct DownloadOptionsDecodingTests {
         #expect(entries.first?.options?.videoQuality == .best)
         #expect(entries.first?.options?.cookieFilePath == "/tmp/c.txt")
     }
+
+    @Test("A history entry saved before downloadID, outputPaths and removedSecretOptions still loads")
+    func historyEntryFromBeforeNewFields() throws {
+        let json = """
+        [{
+          "id": "7D8E0A36-3E2B-4C39-9A0F-6C2E3A0D5B11", "title": "Clip", "sourceURL": "https://example.com/v",
+          "outputPath": "/tmp/Clip.mp4", "date": "2026-09-01T10:00:00Z", "formatSummary": "Best",
+          "kind": "video", "succeeded": true, "fileSizeBytes": 2048
+        }]
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let entry = try #require(try decoder.decode([HistoryEntry].self, from: Data(json.utf8)).first)
+        #expect(entry.downloadID == nil)
+        #expect(entry.outputPaths == nil)
+        #expect(entry.removedSecretOptions == nil)
+        #expect(entry.outputPath == "/tmp/Clip.mp4")
+        // Only the one file it recorded.
+        #expect(entry.outputURLs.map { $0.path(percentEncoded: false) } == ["/tmp/Clip.mp4"])
+    }
+
+    @Test("The new history fields survive a round trip, and the file list is capped")
+    func historyEntryNewFieldsRoundTrip() throws {
+        let downloadID = UUID()
+        let paths = (1...600).map { "/tmp/Playlist/\($0).mp4" }
+        let entry = HistoryEntry(
+            downloadID: downloadID,
+            title: "Playlist",
+            sourceURL: "https://example.com/list",
+            outputPath: paths[0],
+            outputPaths: paths,
+            formatSummary: "Best",
+            kind: .video,
+            succeeded: true,
+            removedSecretOptions: ["--password"]
+        )
+        #expect(entry.outputPaths?.count == HistoryEntry.maximumStoredOutputPaths)
+        #expect(entry.outputPaths?.first == paths[0])
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(HistoryEntry.self, from: encoder.encode(entry))
+        #expect(decoded.downloadID == downloadID)
+        #expect(decoded.outputPaths == entry.outputPaths)
+        #expect(decoded.removedSecretOptions == ["--password"])
+        #expect(decoded.outputURLs.count == HistoryEntry.maximumStoredOutputPaths)
+    }
 }

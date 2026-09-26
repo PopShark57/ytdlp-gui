@@ -36,20 +36,22 @@ final class FirstOutcome<Value: Sendable>: Sendable {
         }
     }
 
-    /// Settles the outcome, unless another one got there first.
-    func settle(_ result: Result<Value, any Error>) {
-        let waiting: CheckedContinuation<Value, any Error>? = state.withLock { state in
+    /// Settles the outcome, unless another one got there first. Returns whether this one did.
+    @discardableResult
+    func settle(_ result: Result<Value, any Error>) -> Bool {
+        let (isFirst, waiting): (Bool, CheckedContinuation<Value, any Error>?) = state.withLock { state in
             switch state {
             case .pending(let continuation?):
                 state = .delivered
-                return continuation
+                return (true, continuation)
             case .pending(nil):
                 state = .settled(result)
-                return nil
+                return (true, nil)
             case .settled, .delivered:
-                return nil
+                return (false, nil)
             }
         }
         waiting?.resume(with: result)
+        return isFirst
     }
 }

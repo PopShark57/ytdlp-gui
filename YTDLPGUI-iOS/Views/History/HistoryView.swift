@@ -7,14 +7,14 @@ struct HistoryView: View {
 
     @State private var searchText = ""
     @State private var filter: Filter = .all
-    @State private var quickLookURL: URL?
+    @State private var previewFiles: [URL] = []
     @State private var photoError: String?
     @State private var confirmsClearing = false
 
     private var history: HistoryStore { model.history }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: path) {
             Group {
                 if history.entries.isEmpty {
                     emptyState
@@ -48,8 +48,18 @@ struct HistoryView: View {
                 }
             }
         }
-        .quickLookPreview($quickLookURL)
+        .quickLookFiles($previewFiles)
         .modifier(PhotoSaveErrorAlert(errorMessage: $photoError))
+    }
+
+    /// The navigation path mirrors `focusedHistoryEntryID`, so setting it anywhere in the app
+    /// (a notification about a finished download) shows that entry, and going back clears it.
+    private var path: Binding<[HistoryEntry.ID]> {
+        Binding {
+            model.focusedHistoryEntryID.map { [$0] } ?? []
+        } set: { newPath in
+            model.focusedHistoryEntryID = newPath.last
+        }
     }
 
     // MARK: - List
@@ -58,7 +68,7 @@ struct HistoryView: View {
         List {
             ForEach(filteredEntries) { entry in
                 NavigationLink(value: entry.id) {
-                    HistoryRowView(entry: entry)
+                    HistoryRowView(entry: entry, isFileMissing: history.isFileMissing(entry))
                 }
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
@@ -70,7 +80,7 @@ struct HistoryView: View {
                 .contextMenu {
                     HistoryEntryActionItems(
                         entry: entry,
-                        onOpen: { quickLookURL = $0 },
+                        onOpen: { previewFiles = $0 },
                         onSaveToPhotos: saveToPhotos,
                         onDelete: { history.remove(entry) }
                     )
@@ -121,7 +131,7 @@ struct HistoryView: View {
                 } label: {
                     Label("Remove Missing Files", systemImage: "questionmark.folder")
                 }
-                .disabled(!history.entries.contains(where: \.isFileMissing))
+                .disabled(!history.hasMissingFiles)
 
                 Button(role: .destructive) {
                     if model.settings.confirmBeforeClearingHistory {
@@ -152,15 +162,8 @@ struct HistoryView: View {
 
     // MARK: - Actions
 
-    private func saveToPhotos(_ url: URL) {
-        Task {
-            do {
-                try await model.library.saveToPhotos(url)
-                model.composer.showStatus("Saved to Photos.")
-            } catch {
-                photoError = error.localizedDescription
-            }
-        }
+    private func saveToPhotos(_ files: [URL]) {
+        saveHistoryFilesToPhotos(files, model: model, errorMessage: $photoError)
     }
 
     // MARK: - Filtering

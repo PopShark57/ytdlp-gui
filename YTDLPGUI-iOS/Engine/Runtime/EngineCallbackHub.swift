@@ -86,7 +86,7 @@ final class EngineCallbackHub: Sendable {
     private let router: Mutex<EngineRequestRouter?>
     /// Tasks answering requests, by job ID, so that cancelling a job also stops its media work.
     private let requestTasks = Mutex<[String: [UUID: Task<Void, Never>]]>([:])
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI", category: "engine")
+    private let logger = AppLog.engine
 
     init(router: EngineRequestRouter? = nil) {
         self.router = Mutex(router)

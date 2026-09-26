@@ -185,7 +185,7 @@ private struct CommandPreviewSection: View {
         } header: {
             Text("Command Preview")
         } footer: {
-            Text("yt-dlp runs inside the app rather than in a shell, so the quoting is only for readability. The app also connects its own progress reporting and processing, which isn't shown.")
+            Text("yt-dlp runs inside the app rather than in a shell, so the quoting is only for readability. Passwords, codes and proxy credentials are shown as PRIVATE, here and in download logs. The app also connects its own progress reporting and processing, which isn't shown.")
         }
     }
 }

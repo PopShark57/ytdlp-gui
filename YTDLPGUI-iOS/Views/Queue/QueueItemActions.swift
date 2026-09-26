@@ -6,19 +6,21 @@ import SwiftUI
 /// two never disagree about what's possible.
 struct QueueItemMenuItems: View {
     let item: DownloadItem
-    var onOpen: (URL) -> Void
+    /// Shows the files in Quick Look.
+    var onOpen: ([URL]) -> Void
     var onShowLog: (() -> Void)?
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let url = item.existingOutputURL {
+        let files = item.existingOutputURLs
+        if !files.isEmpty {
             Button {
-                onOpen(url)
+                onOpen(files)
             } label: {
                 Label("Open", systemImage: "eye")
             }
-            ShareLink(item: url) {
+            ShareLink(items: files) {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
             if model.queue.canSaveToPhotos(item) {
@@ -42,7 +44,7 @@ struct QueueItemMenuItems: View {
 
         if item.canRetry {
             Button {
-                model.queue.retry(item)
+                model.retry(item)
             } label: {
                 Label("Retry", systemImage: "arrow.clockwise")
             }
@@ -122,7 +124,7 @@ struct QueueItemSwipeActions: ViewModifier {
             .swipeActions(edge: .leading) {
                 if item.canRetry {
                     Button {
-                        model.queue.retry(item)
+                        model.retry(item)
                     } label: {
                         Label("Retry", systemImage: "arrow.clockwise")
                     }

@@ -158,15 +158,28 @@ final class AppSettings {
         if let data = defaults.data(forKey: Key.lastOptions),
            let decoded = try? JSONDecoder().decode(DownloadOptions.self, from: data) {
             restored = decoded
+            // Earlier builds kept credentials here.
+            let stripped = decoded.removingSecrets()
+            if !stripped.removed.isEmpty {
+                restored = stripped.options
+                if let data = try? JSONEncoder().encode(restored) {
+                    defaults.set(data, forKey: Key.lastOptions)
+                }
+            }
         }
         // The container, and with it every absolute path, moves when iOS updates or reinstalls
-        // the app, so a stored folder is never trusted.
-        restored.outputDirectory = DownloadOptions.defaultDownloadsDirectory
-        storedOptions = restored
+        // the app, so no stored path is trusted; earlier builds stored resolved ones.
+        storedOptions = DownloadOptionsResolver.editable(restored)
     }
 
-    /// Remembers the options used for the most recent download.
+    /// Remembers the options chosen on the Download screen, which the Share sheet and Shortcuts
+    /// then use too.
+    ///
+    /// Only the person's choices are kept: no paths, which the app fills in afresh for every
+    /// download, and no passwords or other credentials, because `UserDefaults` is included in
+    /// device backups. The Download screen keeps those for as long as the app runs.
     func rememberOptions(_ options: DownloadOptions) {
+        let options = DownloadOptionsResolver.editable(options.removingSecrets().options)
         storedOptions = options
         if let data = try? JSONEncoder().encode(options) {
             defaults.set(data, forKey: Key.lastOptions)

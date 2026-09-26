@@ -8,13 +8,20 @@ struct HistoryDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    @State private var quickLookURL: URL?
+    @State private var previewFiles: [URL] = []
     @State private var photoError: String?
+    /// The files Photos can take, worked out off the main actor when the screen appears.
+    @State private var photoFiles: [URL]?
     /// Keeps the entry on screen while the view animates away after it was removed.
     @State private var retainedEntry: HistoryEntry?
 
     private var entry: HistoryEntry? {
         model.history.entries.first { $0.id == entryID } ?? retainedEntry
+    }
+
+    /// The entry's files still on disk, as `HistoryStore` last checked.
+    private var existingFiles: [URL] {
+        entry.map { model.history.existingFiles(of: $0) } ?? []
     }
 
     var body: some View {
@@ -31,15 +38,21 @@ struct HistoryDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .quickLookPreview($quickLookURL)
+        .quickLookFiles($previewFiles)
         .modifier(PhotoSaveErrorAlert(errorMessage: $photoError))
         .onAppear {
             retainedEntry = model.history.entries.first { $0.id == entryID }
         }
+        .task(id: existingFiles) {
+            photoFiles = await MediaLibrary.photosCompatibleFiles(among: existingFiles)
+        }
     }
 
     private func list(for entry: HistoryEntry) -> some View {
-        List {
+        let files = entry.outputURLs
+        let status = model.history.fileStatus[entry.id]
+        let existingFiles = status?.existingURLs ?? []
+        return List {
             Section {
                 header(for: entry)
             }
@@ -73,15 +86,15 @@ struct HistoryDetailView: View {
                 if let duration = Format.duration(entry.durationSeconds) {
                     LabeledContent("Length", value: duration)
                 }
-                if let name = entry.fileName {
+                if files.count <= 1, let name = entry.fileName {
                     LabeledContent("File") {
                         Text(name)
                             .multilineTextAlignment(.trailing)
                             .textSelection(.enabled)
                     }
                 }
-                if entry.isFileMissing {
-                    WarningRow(message: "The file has been moved or deleted. Download it again to get a new copy.")
+                if entry.succeeded, let status, let warning = MissingFiles.warning(missing: status.missingCount, of: status.recordedCount) {
+                    WarningRow(message: warning + " Download again to get a new copy.")
                 }
                 LabeledContent("Link") {
                     Text(URLDetection.displayString(for: entry.sourceURL))
@@ -92,10 +105,19 @@ struct HistoryDetailView: View {
                 }
             }
 
+            if files.count > 1 {
+                Section("Files (\(files.count))") {
+                    ForEach(files, id: \.self) { file in
+                        FileNameRow(url: file, isMissing: status != nil && !existingFiles.contains(file))
+                    }
+                }
+            }
+
             Section {
                 HistoryEntryActionItems(
                     entry: entry,
-                    onOpen: { quickLookURL = $0 },
+                    photoFiles: photoFiles,
+                    onOpen: { previewFiles = $0 },
                     onSaveToPhotos: saveToPhotos,
                     onDelete: {
                         dismiss()
@@ -125,14 +147,7 @@ struct HistoryDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func saveToPhotos(_ url: URL) {
-        Task {
-            do {
-                try await model.library.saveToPhotos(url)
-                model.composer.showStatus("Saved to Photos.")
-            } catch {
-                photoError = error.localizedDescription
-            }
-        }
+    private func saveToPhotos(_ files: [URL]) {
+        saveHistoryFilesToPhotos(files, model: model, errorMessage: $photoError)
     }
 }

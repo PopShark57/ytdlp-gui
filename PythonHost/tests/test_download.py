@@ -104,7 +104,7 @@ class SingleFileTests(DownloadTestCase):
         self.assertEqual(result['files'], [final])
         self.assertEqual(support.read(final), support.read(support.fixture('clip.mp4')))
 
-        self.assertEqual(APP.events(job_id, 'file'), [{'type': 'file', 'path': final}])
+        self.assertEqual(APP.events(job_id, 'file'), [{'type': 'file', 'path': final, 'main': True}])
         [item] = APP.events(job_id, 'item')
         self.assertEqual(item['id'], 'clip')
         self.assertEqual(item['title'], 'clip')
@@ -155,7 +155,7 @@ class MergeTests(DownloadTestCase):
         self.assertSucceeded(job_id, result)
         final = os.path.join(self.output, 'manifest.mp4')
         self.assertEqual(result['files'], [final])
-        self.assertEqual(APP.events(job_id, 'file'), [{'type': 'file', 'path': final}])
+        self.assertEqual(APP.events(job_id, 'file'), [{'type': 'file', 'path': final, 'main': True}])
         self.assertEqual(self.outputs(), ['manifest.mp4'])  # the parts are gone
         self.assertEqual(sorted(support.streams(final)), [('audio', 'aac'), ('video', 'h264')])
 
@@ -190,6 +190,11 @@ class MergeTests(DownloadTestCase):
         self.assertEqual(self.outputs(), ['webm-audio.faudio.webm', 'webm-audio.fvideo.mp4'])
         self.assertEqual(result['files'], [os.path.join(self.output, 'webm-audio.fvideo.mp4'),
                                            os.path.join(self.output, 'webm-audio.faudio.webm')])
+        # The app names the video, not the audio kept beside it.
+        self.assertEqual(APP.events(job_id, 'file'), [
+            {'type': 'file', 'path': os.path.join(self.output, 'webm-audio.fvideo.mp4'), 'main': True},
+            {'type': 'file', 'path': os.path.join(self.output, 'webm-audio.faudio.webm'), 'main': False},
+        ])
 
     def test_containers_the_app_cannot_write(self):
         job_id, result = self.download(['-f', 'bv+ba', '--merge-output-format', 'mkv'], self.server.url('/manifest.mpd'))

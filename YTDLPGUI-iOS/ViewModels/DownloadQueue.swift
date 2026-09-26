@@ -11,6 +11,28 @@ enum PhotoSaveState: Equatable, Sendable {
     case failed(String)
 }
 
+/// What happened when a link was offered to the queue.
+@MainActor
+enum EnqueueOutcome {
+    /// A new item was added for the link.
+    case added(DownloadItem)
+    /// The link was already waiting or running as this item, so nothing was added.
+    case alreadyPending(DownloadItem)
+
+    /// The item now responsible for the link: the new one, or the one that was already there.
+    var item: DownloadItem {
+        switch self {
+        case .added(let item), .alreadyPending(let item): item
+        }
+    }
+
+    /// The new item, or `nil` when the link was already pending.
+    var addedItem: DownloadItem? {
+        if case .added(let item) = self { return item }
+        return nil
+    }
+}
+
 /// Owns the download queue and runs downloads through the embedded engine.
 ///
 /// The iOS counterpart of the macOS queue, with the same API and behaviour: at most
@@ -27,6 +49,9 @@ final class DownloadQueue {
 
     private(set) var items: [DownloadItem] = []
     private var photoSaveStates: [DownloadItem.ID: PhotoSaveState] = [:]
+    /// The finished files of each completed item that Photos can take. Decided once, off the
+    /// main actor, when the item completes: checking a video reads the file.
+    private var photoEligibleFiles: [DownloadItem.ID: [URL]] = [:]
 
     var activeItems: [DownloadItem] { items.filter { $0.state == .active } }
     var queuedItems: [DownloadItem] { items.filter { $0.state == .queued } }
@@ -56,15 +81,13 @@ final class DownloadQueue {
     private let library: MediaLibrary
     private let resolver: DownloadOptionsResolver
     private let store: QueueStore
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI.iOS", category: "queue")
+    private let logger = AppLog.queue
 
     /// Running work, keyed by item id. Kept out of `DownloadItem` so the model stays a plain
     /// value-ish object that SwiftUI can diff cheaply.
     @ObservationIgnored private var runners: [DownloadItem.ID: Task<Void, Never>] = [:]
     @ObservationIgnored private var jobIDs: [DownloadItem.ID: UUID] = [:]
     @ObservationIgnored private var cancelRequested: Set<DownloadItem.ID> = []
-    /// Final files each finished item produced, for saving to Photos. A playlist makes several.
-    @ObservationIgnored private var producedFiles: [DownloadItem.ID: [URL]] = [:]
 
     /// Items the system stopped (background time ran out) rather than the person.
     @ObservationIgnored private var interruptedIDs: Set<DownloadItem.ID> = []
@@ -93,8 +116,7 @@ final class DownloadQueue {
         history: HistoryStore,
         notifications: NotificationService,
         library: MediaLibrary,
-        storage: StorageManager,
-        cookies: CookieStore,
+        resolver: DownloadOptionsResolver,
         store: QueueStore = QueueStore()
     ) {
         self.settings = settings
@@ -103,7 +125,7 @@ final class DownloadQueue {
         self.history = history
         self.notifications = notifications
         self.library = library
-        self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
+        self.resolver = resolver
         self.store = store
         observeConcurrencyLimit()
     }
@@ -114,9 +136,25 @@ final class DownloadQueue {
 
     // MARK: - Adding
 
-    /// Adds one link to the queue. Paths in `options` are replaced with this install's own.
+    /// The waiting or running item for this link, if there is one.
+    ///
+    /// A link is only ever queued once at a time. yt-dlp names its temporary files after the
+    /// video and doesn't lock them, so two jobs for one link would write the same `.part` files.
+    /// Different quality choices still share the audio stream's file, so the rule is by link,
+    /// not by options.
+    func pendingItem(forURL url: String) -> DownloadItem? {
+        let key = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        return items.first { !$0.state.isFinished && $0.sourceURL == key }
+    }
+
+    /// Adds one link to the queue, unless it is already waiting or running. Paths in `options`
+    /// are replaced with this install's own.
     @discardableResult
-    func enqueue(url: String, options: DownloadOptions, info: MediaInfo? = nil) -> DownloadItem {
+    func enqueue(url: String, options: DownloadOptions, info: MediaInfo? = nil) -> EnqueueOutcome {
+        let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let pending = pendingItem(forURL: url) {
+            return .alreadyPending(pending)
+        }
         let options = resolver.resolve(options)
         let item = DownloadItem(
             sourceURL: url,
@@ -129,20 +167,19 @@ final class DownloadQueue {
             playlistCount: info?.playlistCount
         )
         items.append(item)
-        settings.rememberOptions(options)
+        logger.info("Queued \(item.id.uuidString, privacy: .public): \(url, privacy: .private)")
         queueDidChange()
-        return item
+        return .added(item)
     }
 
-    /// Queues several links, skipping blanks and ones already waiting.
+    /// Queues several links, skipping blanks, repeats and ones already waiting or running.
+    /// Returns the items that were added.
     @discardableResult
     func enqueue(urls: [String], options: DownloadOptions) -> [DownloadItem] {
-        let pending = Set(items.filter { !$0.state.isFinished }.map(\.sourceURL))
-        var seen = Set<String>()
-        return urls
+        urls
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && !pending.contains($0) && seen.insert($0).inserted }
-            .map { enqueue(url: $0, options: options) }
+            .filter { !$0.isEmpty }
+            .compactMap { enqueue(url: $0, options: options).addedItem }
     }
 
     // MARK: - Queue control
@@ -154,6 +191,7 @@ final class DownloadQueue {
             // final events still in flight.
             cancelRequested.insert(item.id)
             interruptedIDs.remove(item.id)
+            logger.info("Cancelling \(item.id.uuidString, privacy: .public) (job \(self.jobIDs[item.id]?.uuidString ?? "not started", privacy: .public))")
             if let jobID = jobIDs[item.id] {
                 downloader.cancel(jobID: jobID)
             }
@@ -169,15 +207,33 @@ final class DownloadQueue {
         for item in items where item.canCancel { cancel(item) }
     }
 
-    func retry(_ item: DownloadItem) {
-        guard item.canRetry else { return }
+    /// Runs a failed or cancelled item again, unless another item for the same link is waiting
+    /// or running. Returns that other item when it is why nothing happened.
+    @discardableResult
+    func retry(_ item: DownloadItem) -> DownloadItem? {
+        guard item.canRetry else { return nil }
+        if let pending = pendingItem(forURL: item.sourceURL), pending.id != item.id {
+            return pending
+        }
         prepareForRetry(item)
         queueDidChange()
+        return nil
     }
 
-    func retryAllFailed() {
-        for item in items where item.state == .failed { prepareForRetry(item) }
+    /// Retries every failed item whose link isn't already waiting or running, including by an
+    /// item retried just before it. Returns how many were skipped for that reason.
+    @discardableResult
+    func retryAllFailed() -> Int {
+        var skipped = 0
+        for item in items where item.state == .failed {
+            if let pending = pendingItem(forURL: item.sourceURL), pending.id != item.id {
+                skipped += 1
+            } else {
+                prepareForRetry(item)
+            }
+        }
         queueDidChange()
+        return skipped
     }
 
     func remove(_ item: DownloadItem) {
@@ -208,10 +264,11 @@ final class DownloadQueue {
     }
 
     private func prepareForRetry(_ item: DownloadItem) {
+        logger.info("Queued \(item.id.uuidString, privacy: .public) again (was \(item.state.rawValue, privacy: .public))")
         interruptedIDs.remove(item.id)
         resumableIDs.remove(item.id)
         photoSaveStates[item.id] = nil
-        producedFiles[item.id] = nil
+        photoEligibleFiles[item.id] = nil
         item.prepareForRetry()
     }
 
@@ -219,7 +276,7 @@ final class DownloadQueue {
         cancelRequested.remove(id)
         interruptedIDs.remove(id)
         resumableIDs.remove(id)
-        producedFiles[id] = nil
+        photoEligibleFiles[id] = nil
         photoSaveStates[id] = nil
     }
 
@@ -231,6 +288,7 @@ final class DownloadQueue {
     /// waiting, and nothing new starts until `resumeInterruptedDownloads()`.
     func interruptActiveDownloads() {
         isSuspended = true
+        logger.notice("Background time ran out: stopping \(self.activeCount, privacy: .public) download(s) until the app returns")
         for item in activeItems {
             interruptedIDs.insert(item.id)
             cancelRequested.insert(item.id)
@@ -245,6 +303,7 @@ final class DownloadQueue {
     /// foreground; does nothing if nothing was interrupted.
     func resumeInterruptedDownloads() {
         guard isSuspended || !interruptedIDs.isEmpty else { return }
+        logger.info("Back in the foreground: resuming \(self.interruptedIDs.count, privacy: .public) interrupted download(s)")
         isSuspended = false
         for item in items where item.state == .cancelled && interruptedIDs.contains(item.id) {
             prepareForRetry(item)
@@ -264,11 +323,17 @@ final class DownloadQueue {
     }
 
     /// Starts queued items until the concurrency limit is reached.
+    ///
+    /// An item whose link is already running waits for that one to finish. Adding and retrying
+    /// already refuse a second item for a pending link; this also covers the paths that bypass
+    /// them, such as downloads resuming after a background interruption.
     private func startEligibleItems() {
         guard !isSuspended else { return }
         let limit = settings.maximumConcurrentDownloads.constrained(to: AppSettings.concurrencyRange)
         for item in items where item.state == .queued {
             guard activeCount < limit else { break }
+            let linkIsRunning = items.contains { $0.state == .active && $0.sourceURL == item.sourceURL }
+            guard !linkIsRunning else { continue }
             start(item)
         }
     }
@@ -351,10 +416,12 @@ final class DownloadQueue {
             options: options,
             capabilities: capabilities
         )
-        item.log.append("$ " + ShellQuoting.commandLine(executable: "yt-dlp", arguments: argv))
+        // Logs get shared in bug reports, so secrets are masked here; the engine gets the real argv.
+        item.log.append("$ " + ShellQuoting.commandLine(executable: "yt-dlp", arguments: ShellQuoting.redactingSecrets(argv)))
 
         let jobID = UUID()
         jobIDs[item.id] = jobID
+        logger.info("Started \(item.id.uuidString, privacy: .public) as job \(jobID.uuidString, privacy: .public)")
         var tracker = OutputTracker(outputDirectory: options.outputDirectory)
         var result: EngineJobResult?
 
@@ -379,16 +446,20 @@ final class DownloadQueue {
             return
         }
 
-        let files = tracker.finalFiles(including: result.files)
-        producedFiles[item.id] = files
-
         if result.wasCancelled {
             finishCancelled(item)
         } else if result.isSuccess {
-            item.outputURL = files.last ?? tracker.fallbackURL
+            let files = tracker.finalFiles(including: result.files)
+            item.outputURLs = files
+            // Not simply the last file: a video whose audio had to be kept beside it reports the
+            // audio after the video.
+            item.outputURL = tracker.mainFile(among: files) ?? tracker.fallbackURL
             item.completedFileSize = Self.totalSize(of: files.isEmpty ? item.outputURL.map { [$0] } ?? [] : files)
             finish(item, failure: nil)
         } else if let hostError = result.hostError {
+            // As the command-line tool would print it, so "Show Log" and a shared log explain
+            // the failure.
+            item.log.append("ERROR: \(hostError)")
             finish(item, failure: DownloadFailure(kind: .unknown, underlyingMessage: hostError))
         } else {
             finish(item, failure: DownloadFailure.classify(logLines: item.log.lines, exitCode: result.exitCode))
@@ -405,8 +476,11 @@ final class DownloadQueue {
         var downloadDestination: URL?
         /// Set by merging, audio extraction or metadata stages.
         var processedDestination: URL?
-        /// Final locations reported by `file` events, one per finished video. Authoritative.
+        /// Final locations reported by `file` events: each finished video, and anything kept
+        /// beside it. Authoritative.
         var reportedFiles: [URL] = []
+        /// The reported files that are videos (or songs), not companions kept beside one.
+        var reportedMainFiles: [URL] = []
 
         /// The best guess when the engine reported no final file at all.
         var fallbackURL: URL? { processedDestination ?? downloadDestination }
@@ -423,9 +497,16 @@ final class DownloadQueue {
             processedDestination = resolve(path)
         }
 
-        mutating func recordFinal(path: String) {
+        mutating func recordFinal(path: String, isMain: Bool) {
             let url = resolve(path)
             if !reportedFiles.contains(url) { reportedFiles.append(url) }
+            if isMain, !reportedMainFiles.contains(url) { reportedMainFiles.append(url) }
+        }
+
+        /// The file that stands for the download: the last video reported, which for a single
+        /// video is the video itself. Without `file` events, the first file the job listed.
+        func mainFile(among files: [URL]) -> URL? {
+            reportedMainFiles.last ?? files.first
         }
 
         func finalFiles(including resultPaths: [String]) -> [URL] {
@@ -476,11 +557,12 @@ final class DownloadQueue {
         case .item(let info):
             applyItemInfo(info, to: item)
 
-        case .file(let path):
-            tracker.recordFinal(path: path)
-            // Counted per finished file rather than per finished transfer: a merged video is
-            // two transfers (picture and sound) but one item of a playlist.
-            item.completedItemCount += 1
+        case .file(let path, let isMain):
+            tracker.recordFinal(path: path, isMain: isMain)
+            // Counted per finished video rather than per finished transfer or file: a merged
+            // video is two transfers (picture and sound) but one item of a playlist, and so is a
+            // video whose audio had to be kept beside it.
+            if isMain { item.completedItemCount += 1 }
         }
     }
 
@@ -540,14 +622,16 @@ final class DownloadQueue {
         resumableIDs.remove(item.id)
         finishedSinceIdle += 1
 
+        let job = jobIDs[item.id]?.uuidString ?? "none"
         if let failure {
             item.state = .failed
             item.phase = .failed
             failedSinceIdle += 1
-            logger.error("Download failed: \(failure.title, privacy: .public)")
+            logger.error("Failed \(item.id.uuidString, privacy: .public) (job \(job, privacy: .public)): \(failure.title, privacy: .public)")
         } else {
             item.state = .completed
             item.phase = .completed
+            logger.info("Completed \(item.id.uuidString, privacy: .public) (job \(job, privacy: .public)): \(item.outputURLs.count, privacy: .public) file(s)")
             if item.progress.fractionCompleted == nil {
                 item.progress.totalBytes = item.completedFileSize
                 item.progress.downloadedBytes = item.completedFileSize
@@ -555,7 +639,11 @@ final class DownloadQueue {
             completedSinceIdle += 1
         }
 
-        history.add(item.makeHistoryEntry())
+        var entry = item.makeHistoryEntry()
+        // History outlives the download and is included in device backups, so passwords and
+        // other credentials stay out of it. The item keeps them, so a retry still works.
+        entry.removeSecrets()
+        history.add(entry)
 
         if settings.notifyWhenComplete {
             let notifications = notifications
@@ -570,8 +658,8 @@ final class DownloadQueue {
             }
         }
 
-        if failure == nil, settings.saveVideosToPhotos, item.options.kind == .video, canSaveToPhotos(item) {
-            saveToPhotos(item)
+        if failure == nil {
+            decidePhotoEligibility(of: item, thenSave: settings.saveVideosToPhotos && item.options.kind == .video)
         }
     }
 
@@ -587,6 +675,7 @@ final class DownloadQueue {
         item.phase = .cancelled
         item.finishedAt = Date()
         finishedSinceIdle += 1
+        logger.info("Cancelled \(item.id.uuidString, privacy: .public)\(self.interruptedIDs.contains(item.id) ? " by the system; it resumes later" : "", privacy: .public)")
 
         if interruptedIDs.contains(item.id) {
             resumableIDs.insert(item.id)
@@ -633,6 +722,8 @@ final class DownloadQueue {
 
     // MARK: - Photos
 
+    /// Whether the completed item has files Photos can take. False until that has been worked
+    /// out, a moment after the download completes.
     func canSaveToPhotos(_ item: DownloadItem) -> Bool {
         item.state == .completed && !photoFiles(for: item).isEmpty
     }
@@ -668,8 +759,26 @@ final class DownloadQueue {
     }
 
     private func photoFiles(for item: DownloadItem) -> [URL] {
-        let files = producedFiles[item.id] ?? item.outputURL.map { [$0] } ?? []
-        return files.filter(library.canSaveToPhotos)
+        photoEligibleFiles[item.id] ?? []
+    }
+
+    /// Works out, off the main actor, which of a completed item's files Photos can take, and
+    /// then saves them if `thenSave`.
+    private func decidePhotoEligibility(of item: DownloadItem, thenSave: Bool) {
+        let files = item.outputURLs.isEmpty ? item.outputURL.map { [$0] } ?? [] : item.outputURLs
+        guard !files.isEmpty else { return }
+        let id = item.id
+        let finishedAt = item.finishedAt
+        Task { [weak self] in
+            let eligible = await MediaLibrary.photosCompatibleFiles(among: files)
+            // The item may have been removed or retried meanwhile.
+            guard let self, let item = self.item(withID: id), item.state == .completed,
+                  item.finishedAt == finishedAt else { return }
+            self.photoEligibleFiles[id] = eligible
+            if thenSave, !eligible.isEmpty {
+                self.saveToPhotos(item)
+            }
+        }
     }
 
     // MARK: - Persistence

@@ -49,11 +49,16 @@ final class AppModel {
     let queue: DownloadQueue
     let composer: DownloadComposer
     let background: BackgroundActivity
+    /// The passing message shown over every tab.
+    let status: StatusCenter
 
     var selectedTab: AppTab = .download
 
     /// The queue item whose details are showing, if any. Setting it navigates there.
     var focusedQueueItemID: DownloadItem.ID?
+
+    /// The history entry whose details are showing, if any. Setting it navigates there.
+    var focusedHistoryEntryID: HistoryEntry.ID?
 
     /// Whether the clipboard appears to hold a web link the user hasn't been offered yet.
     ///
@@ -68,7 +73,6 @@ final class AppModel {
 
     private let clipboard: any ClipboardLinkDetecting
     private let drainSharedInbox: () -> [SharedLink]
-    private let resolver: DownloadOptionsResolver
     /// The clipboard's `changeCount` when it was last looked at, so the same contents are only
     /// ever offered once.
     @ObservationIgnored private var lastCheckedClipboardChangeCount: Int?
@@ -81,6 +85,9 @@ final class AppModel {
         let history = HistoryStore()
         let notifications = NotificationService()
         let library = MediaLibrary()
+        let status = StatusCenter()
+        // One resolver for everything that turns options into arguments.
+        let resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
         let engine = EngineController(engine: .shared, temporaryDirectory: storage.partialDownloadsDirectory)
         let queue = DownloadQueue(
             settings: settings,
@@ -89,8 +96,7 @@ final class AppModel {
             history: history,
             notifications: notifications,
             library: library,
-            storage: storage,
-            cookies: cookies
+            resolver: resolver
         )
         let composer = DownloadComposer(
             settings: settings,
@@ -98,7 +104,9 @@ final class AppModel {
             queue: queue,
             storage: storage,
             cookies: cookies,
-            analyzer: YTDLPEngine.shared
+            resolver: resolver,
+            analyzer: YTDLPEngine.shared,
+            status: status
         )
         self.init(
             settings: settings,
@@ -111,6 +119,7 @@ final class AppModel {
             queue: queue,
             composer: composer,
             background: BackgroundActivity(settings: settings),
+            status: status,
             clipboard: SystemClipboardLinkDetector(),
             drainSharedInbox: { SharedLinkInbox.drain() }
         )
@@ -128,6 +137,7 @@ final class AppModel {
         queue: DownloadQueue,
         composer: DownloadComposer,
         background: BackgroundActivity,
+        status: StatusCenter,
         clipboard: any ClipboardLinkDetecting,
         drainSharedInbox: @escaping () -> [SharedLink]
     ) {
@@ -141,9 +151,9 @@ final class AppModel {
         self.queue = queue
         self.composer = composer
         self.background = background
+        self.status = status
         self.clipboard = clipboard
         self.drainSharedInbox = drainSharedInbox
-        self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
 
         storage.isPartialDownloadInUse = { [weak queue] in
             (queue?.activeCount ?? 0) > 0
@@ -155,7 +165,7 @@ final class AppModel {
             queue?.interruptActiveDownloads()
         }
         notifications.onOpenDownload = { [weak self] id in
-            self?.showQueueItem(id)
+            self?.openDownload(id)
         }
     }
 
@@ -170,6 +180,8 @@ final class AppModel {
         // Starting Python takes a moment; everything else can happen meanwhile, and queued
         // downloads wait for it by themselves.
         let engineStart = Task { [engine] in await engine.start() }
+        // Earlier builds kept passwords and other credentials in history.
+        history.updateEntries { $0.removeSecrets() }
         queue.restoreUnfinishedItems()
         receiveSharedLinks()
         await checkClipboard()
@@ -184,6 +196,8 @@ final class AppModel {
         switch phase {
         case .active:
             queue.resumeInterruptedDownloads()
+            // Files may have been deleted or moved back in the Files app meanwhile.
+            history.refreshFileStatus()
             receiveSharedLinks()
             Task { await checkClipboard() }
         case .background:
@@ -205,7 +219,7 @@ final class AppModel {
     func handleOpenURL(_ url: URL) {
         guard let request = DownloadLinkRequest(url: url) else {
             if url.scheme?.lowercased() == DownloadLinkRequest.scheme {
-                composer.showStatus("That link didn't include a web address to download.")
+                status.show("That link didn't include a web address to download.")
             }
             return
         }
@@ -263,7 +277,7 @@ final class AppModel {
             if let kind = link.kind {
                 var options = settings.storedOptions
                 options.kind = kind
-                queuedCount += queue.enqueue(urls: link.urls, options: resolver.resolve(options)).count
+                queuedCount += queue.enqueue(urls: link.urls, options: options).count
             } else {
                 linksForComposer += link.urls
             }
@@ -277,7 +291,7 @@ final class AppModel {
             selectedTab = .queue
         }
         if queuedCount > 0 {
-            composer.showStatus(queuedCount == 1
+            status.show(queuedCount == 1
                 ? "Added a shared link to the queue."
                 : "Added \(queuedCount) shared links to the queue.")
         }
@@ -289,7 +303,7 @@ final class AppModel {
     func enqueueFromShortcut(url: String, kind: DownloadKind?) -> Bool {
         var options = settings.storedOptions
         if let kind { options.kind = kind }
-        let added = queue.enqueue(urls: [url], options: resolver.resolve(options))
+        let added = queue.enqueue(urls: [url], options: options)
         selectedTab = .queue
         return !added.isEmpty
     }
@@ -314,40 +328,83 @@ final class AppModel {
 
     /// Queues a history entry again with the options it was first downloaded with, after
     /// stripping any custom arguments the engine refuses, so history can't replay them.
+    ///
+    /// When the link is already waiting or running, that download is shown instead.
     func downloadAgain(_ entry: HistoryEntry) {
         var options = entry.options ?? composer.options
         if entry.options == nil { options.kind = entry.kind }
         let sanitized = DownloadOptionsResolver.sanitizedCustomArguments(options.customArguments)
         options.customArguments = sanitized.arguments
 
-        let item = queue.enqueue(url: entry.sourceURL, options: resolver.resolve(options))
+        let item: DownloadItem
+        switch queue.enqueue(url: entry.sourceURL, options: options) {
+        case .added(let added):
+            item = added
+        case .alreadyPending(let pending):
+            showQueueItem(pending.id)
+            status.show("That link is already in the queue.")
+            return
+        }
         if item.title == nil, entry.title != entry.sourceURL { item.title = entry.title }
         if item.thumbnailURL == nil { item.thumbnailURL = entry.thumbnailURL }
         if item.durationSeconds == nil { item.durationSeconds = entry.durationSeconds }
         selectedTab = .queue
 
+        var notes: [String] = []
         if !sanitized.removed.isEmpty {
-            composer.showStatus(
-                "Removed \(Self.describe(sanitized.removed)) before downloading again."
-            )
+            notes.append("Removed \(Self.describe(sanitized.removed)) before downloading again.")
+        }
+        if let secrets = entry.removedSecretOptions, !secrets.isEmpty {
+            notes.append(Self.describeRemovedSecrets(secrets))
+        }
+        if !notes.isEmpty {
+            status.show(notes.joined(separator: " "))
         }
     }
 
     /// Puts a history entry's link and options into the Download screen, to adjust before
-    /// downloading again.
+    /// downloading again ("Edit Options and Download").
+    ///
+    /// Paths from the earlier download and custom arguments the engine refuses are dropped, and
+    /// the person is told which arguments went. The link is analysed (when that setting is on),
+    /// so the formats are there to look at while editing.
     func loadIntoComposer(_ entry: HistoryEntry) {
         if let options = entry.options {
             composer.loadOptions(options)
+            var notes: [String] = []
             let removed = DownloadOptionsResolver.sanitizedCustomArguments(options.customArguments).removed
             if !removed.isEmpty {
-                composer.showStatus("Removed \(Self.describe(removed)) from the custom arguments.")
+                notes.append("Removed \(Self.describe(removed)) from the custom arguments.")
+            }
+            if let secrets = entry.removedSecretOptions, !secrets.isEmpty {
+                notes.append(Self.describeRemovedSecrets(secrets) + " Add them again in Advanced Options if they're needed.")
+            }
+            if !notes.isEmpty {
+                status.show(notes.joined(separator: " "))
             }
         } else {
             composer.options.kind = entry.kind
         }
         hasClipboardSuggestion = false
-        composer.setURLText(entry.sourceURL, analyzeIfEnabled: false)
+        composer.setURLText(entry.sourceURL, analyzeIfEnabled: true)
         selectedTab = .download
+    }
+
+    /// Runs a failed or cancelled download again, unless its link is already waiting or running
+    /// as another item, which is then pointed out instead.
+    func retry(_ item: DownloadItem) {
+        guard queue.retry(item) != nil else { return }
+        status.show("That link is already in the queue.")
+    }
+
+    /// Retries every failed download, and says how many were left alone because their link is
+    /// already waiting or running.
+    func retryAllFailed() {
+        let skipped = queue.retryAllFailed()
+        guard skipped > 0 else { return }
+        status.show(skipped == 1
+            ? "One download wasn't retried because its link is already in the queue."
+            : "\(skipped) downloads weren't retried because their links are already in the queue.")
     }
 
     /// Shows a queue item's details.
@@ -356,11 +413,37 @@ final class AppModel {
         focusedQueueItemID = id
     }
 
-    /// Whether leaving now would interrupt running downloads.
-    var hasWorkInProgress: Bool { queue.activeCount > 0 }
+    /// Shows a history entry's details.
+    func showHistoryEntry(_ id: HistoryEntry.ID) {
+        selectedTab = .history
+        focusedHistoryEntryID = id
+    }
+
+    /// Shows the download a notification was about: in the queue while it is still there,
+    /// otherwise its history entry. The queue forgets finished downloads when the app is
+    /// relaunched (iOS often ends a backgrounded app after the notification was posted) or when
+    /// they are cleared, but history keeps them.
+    func openDownload(_ id: DownloadItem.ID) {
+        if queue.item(withID: id) != nil {
+            showQueueItem(id)
+        } else if let entry = history.entries.first(where: { $0.downloadID == id }) {
+            // Newest first, so a retried download opens its latest attempt.
+            showHistoryEntry(entry.id)
+        } else {
+            selectedTab = .history
+            focusedHistoryEntryID = nil
+            status.show("That download is no longer in the queue or the history.")
+        }
+    }
 
     private static func describe(_ flags: [String]) -> String {
         let listed = flags.map { "‘\($0)’" }.joined(separator: ", ")
         return "the unsupported option\(flags.count == 1 ? "" : "s") \(listed)"
+    }
+
+    /// For history entries saved without their credentials (`HistoryEntry.removedSecretOptions`).
+    private static func describeRemovedSecrets(_ flags: [String]) -> String {
+        let listed = flags.map { "‘\($0)’" }.joined(separator: ", ")
+        return "History doesn't keep passwords or other credentials, so those given with \(listed) were left out."
     }
 }

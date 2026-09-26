@@ -126,22 +126,46 @@ class InstallUpdateTests(unittest.TestCase):
         ])
         self.assertEqual(os.listdir(self.staging), [])
 
-    def test_replaces_a_previous_update(self):
-        os.makedirs(os.path.join(self.update_dir, 'yt_dlp'))
-        with open(os.path.join(self.update_dir, 'yt_dlp', 'old.py'), 'w') as file:
-            file.write('')
+    def test_never_replaces_an_existing_folder(self):
+        # The running interpreter may be importing from it.
+        for existing in ('with-files', 'empty'):
+            with self.subTest(existing=existing):
+                shutil.rmtree(self.update_dir, ignore_errors=True)
+                os.makedirs(os.path.join(self.update_dir, 'yt_dlp') if existing == 'with-files' else self.update_dir)
+                if existing == 'with-files':
+                    with open(os.path.join(self.update_dir, 'yt_dlp', 'old.py'), 'w') as file:
+                        file.write('')
+                with FakePyPI():
+                    result = self.install()
+                self.assertEqual(result['ok'], False)
+                self.assertIn('already exists', result['error'])
+                if existing == 'with-files':
+                    self.assertTrue(os.path.exists(os.path.join(self.update_dir, 'yt_dlp', 'old.py')))
+                else:
+                    self.assertEqual(os.listdir(self.update_dir), [])
+
+    def test_installs_beside_the_update_in_use_without_touching_it(self):
+        # The app's layout: each update in a folder of its own under versions/.
+        versions = os.path.join(self.root, 'Engine', 'yt-dlp', 'versions')
+        in_use = os.path.join(versions, 'A')
+        os.makedirs(os.path.join(in_use, 'yt_dlp'))
+        with open(os.path.join(in_use, 'yt_dlp', 'extractor.py'), 'w') as file:
+            file.write('VERSION = "A"\n')
+        self.update_dir = os.path.join(versions, 'B')
         with FakePyPI():
             self.assertTrue(self.install()['ok'])
-        self.assertFalse(os.path.exists(os.path.join(self.update_dir, 'yt_dlp', 'old.py')))
-        self.assertTrue(os.path.exists(os.path.join(self.update_dir, 'yt_dlp', 'version.py')))
+        self.assertEqual(sorted(os.listdir(versions)), ['A', 'B'])
+        self.assertEqual(os.listdir(os.path.join(in_use, 'yt_dlp')), ['extractor.py'])
+        self.assertTrue(os.path.isfile(os.path.join(self.update_dir, 'yt_dlp', 'version.py')))
+        self.assertFalse(os.path.exists(os.path.join(self.update_dir, 'previous')))
+        self.assertEqual(os.listdir(self.staging), [])
 
     def test_rejects_a_wheel_that_does_not_match_its_digest(self):
-        os.makedirs(os.path.join(self.update_dir, 'yt_dlp'))
         with FakePyPI(yt_dlp_digest='1' * 64):
             result = self.install()
         self.assertEqual(result['ok'], False)
         self.assertIn("doesn't match the checksum", result['error'])
-        self.assertEqual(os.listdir(self.update_dir), ['yt_dlp'])
+        self.assertFalse(os.path.exists(self.update_dir))
         self.assertEqual(os.listdir(self.staging), [])
 
     def test_rejects_an_ejs_wheel_that_does_not_match_its_digest(self):
@@ -280,6 +304,49 @@ class StartingWithAnUpdateTests(unittest.TestCase):
         self.assertIsNone(configured['update_error'])
         self.assertTrue(result['yt_dlp_file'].startswith(update_dir))
         self.assertTrue(result['analysis_ok'])
+
+    @support.requires_ffmpeg
+    def test_installing_another_update_leaves_the_running_one_alone(self):
+        # yt-dlp imports each extractor the first time it is used, from the folder it started
+        # with, so a later install must not change what that folder holds.
+        running = self.update_dir()
+        for package in ('yt_dlp', 'yt_dlp_ejs'):
+            shutil.copytree(os.path.join(VENDOR, package), os.path.join(running, package),
+                            ignore=shutil.ignore_patterns('__pycache__'))
+        new_update = os.path.join(os.path.dirname(running), f'{os.path.basename(running)}-next')
+        staging = tempfile.mkdtemp(dir=support.scratch_dir(), prefix='staging-')
+        script = textwrap.dedent('''
+            import json, sys, types
+            stand_in = types.ModuleType('_ytdlpgui')
+            stand_in.emit = lambda job, event: None
+            stand_in.request = lambda job, request: '{"ok": false, "error": "none"}'
+            stand_in.interrupt = lambda ident, error: 0
+            sys.modules['_ytdlpgui'] = stand_in
+            import ytdlpgui_host
+            configured = json.loads(ytdlpgui_host.dispatch('configure', json.dumps(
+                {"cache_dir": None, "update_dir": sys.argv[1], "platform_version": "18.0"})))
+            unused = 'yt_dlp.extractor.vimeo'
+            was_loaded = unused in sys.modules
+            installed = json.loads(ytdlpgui_host.dispatch('install_update', json.dumps(
+                {"staging_dir": sys.argv[3], "update_dir": sys.argv[2]})))
+            import importlib
+            extractor = importlib.import_module(unused)
+            print(json.dumps({"configured": configured, "installed": installed, "was_loaded": was_loaded,
+                              "extractor_file": extractor.__file__}))
+        ''')
+        with FakePyPI():
+            environment = dict(os.environ, PYTHONPATH=os.pathsep.join([HOST, VENDOR]), PYTHONDONTWRITEBYTECODE='1')
+            completed = subprocess.run(
+                [sys.executable, '-c', script, running, new_update, staging],
+                capture_output=True, text=True, env=environment, timeout=120)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout.strip().splitlines()[-1])
+        self.assertEqual(result['configured']['yt_dlp_source'], 'updated')
+        self.assertEqual(result['installed'], {'ok': True, 'version': NEW_VERSION})
+        self.assertFalse(result['was_loaded'])
+        self.assertTrue(result['extractor_file'].startswith(running), result['extractor_file'])
+        self.assertTrue(os.path.isfile(os.path.join(running, 'yt_dlp', 'extractor', 'vimeo.py')))
+        self.assertTrue(os.path.isfile(os.path.join(new_update, 'yt_dlp', 'version.py')))
 
     @support.requires_ffmpeg
     def test_no_update_installed(self):

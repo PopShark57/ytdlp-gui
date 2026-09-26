@@ -18,7 +18,7 @@ final class NotificationService {
         didSet { installResponderIfNeeded() }
     }
 
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI.iOS", category: "notifications")
+    private let logger = AppLog.notifications
     private var responder: NotificationResponder?
 
     nonisolated private static let itemIDKey = "downloadItemID"

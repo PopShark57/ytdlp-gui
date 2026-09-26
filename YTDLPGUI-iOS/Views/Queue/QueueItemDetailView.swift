@@ -12,7 +12,7 @@ struct QueueItemDetailView: View {
 
     @State private var pane: Pane = .details
     @State private var containerWidth: CGFloat = 0
-    @State private var quickLookURL: URL?
+    @State private var previewFiles: [URL] = []
     /// Keeps the item on screen while the view animates away after it was removed.
     @State private var retainedItem: DownloadItem?
 
@@ -74,20 +74,26 @@ struct QueueItemDetailView: View {
         }
         .onAppear {
             retainedItem = model.queue.item(withID: itemID)
+            // Opened for a download the queue doesn't have (it was cleared, or the app was
+            // relaunched since): go back rather than leave "Download Removed" up. Notification
+            // taps go through `AppModel.openDownload`, which shows such a download in History.
+            if retainedItem == nil, model.focusedQueueItemID == itemID {
+                model.focusedQueueItemID = nil
+            }
         }
         .onChange(of: isInQueue) { _, isInQueue in
             if !isInQueue, model.focusedQueueItemID == itemID {
                 model.focusedQueueItemID = nil
             }
         }
-        .quickLookPreview($quickLookURL)
+        .quickLookFiles($previewFiles)
     }
 
     @ViewBuilder
     private func content(for item: DownloadItem) -> some View {
         if showsSideBySide {
             HStack(spacing: 0) {
-                QueueItemInfoList(item: item, onOpen: { quickLookURL = $0 })
+                QueueItemInfoList(item: item, onOpen: { previewFiles = $0 })
                     .frame(width: min(440, containerWidth * 0.45))
                 Divider()
                 QueueItemLog(item: item)
@@ -95,7 +101,7 @@ struct QueueItemDetailView: View {
         } else {
             switch pane {
             case .details:
-                QueueItemInfoList(item: item, onOpen: { quickLookURL = $0 })
+                QueueItemInfoList(item: item, onOpen: { previewFiles = $0 })
             case .log:
                 QueueItemLog(item: item)
             }
@@ -106,11 +112,13 @@ struct QueueItemDetailView: View {
 /// The details half of the detail screen.
 private struct QueueItemInfoList: View {
     let item: DownloadItem
-    var onOpen: (URL) -> Void
+    /// Shows the files in Quick Look.
+    var onOpen: ([URL]) -> Void
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let existingFiles = item.existingOutputURLs
         List {
             Section {
                 header
@@ -120,15 +128,15 @@ private struct QueueItemInfoList: View {
                 progressSection
             }
             if item.state == .completed {
-                fileSection
+                fileSection(existingFiles: existingFiles)
             }
             if let failure = item.failure, item.state == .failed || item.state == .cancelled {
                 failureSection(failure)
             }
-            if item.existingOutputURL != nil, model.queue.canSaveToPhotos(item) {
+            if !existingFiles.isEmpty, model.queue.canSaveToPhotos(item) {
                 photosSection
             }
-            actionsSection
+            actionsSection(existingFiles: existingFiles)
             sourceSection
         }
         .readableContentWidth()
@@ -208,9 +216,18 @@ private struct QueueItemInfoList: View {
 
     // MARK: - File
 
-    private var fileSection: some View {
-        Section {
-            if let name = item.outputURL?.lastPathComponent {
+    private func fileSection(existingFiles: [URL]) -> some View {
+        let files = item.outputURLs.isEmpty ? item.outputURL.map { [$0] } ?? [] : item.outputURLs
+        return Section {
+            if files.count > 1 {
+                DisclosureGroup {
+                    ForEach(files, id: \.self) { file in
+                        FileNameRow(url: file, isMissing: !existingFiles.contains(file))
+                    }
+                } label: {
+                    LabeledContent("Files", value: files.count.formatted())
+                }
+            } else if let name = item.outputURL?.lastPathComponent {
                 LabeledContent("Name") {
                     Text(name)
                         .multilineTextAlignment(.trailing)
@@ -226,11 +243,11 @@ private struct QueueItemInfoList: View {
             if let playlist = item.playlistProgressLabel {
                 LabeledContent("Playlist", value: playlist)
             }
-            if item.outputURL != nil, item.existingOutputURL == nil {
-                WarningRow(message: "The file has been moved or deleted.")
+            if let warning = MissingFiles.warning(missing: files.count - existingFiles.count, of: files.count) {
+                WarningRow(message: warning)
             }
         } header: {
-            Text("File")
+            Text(files.count > 1 ? "Files" : "File")
         } footer: {
             Text("Finished downloads are in the Files app, in On My \(DeviceName.current) › YTDLP GUI.")
         }
@@ -299,27 +316,27 @@ private struct QueueItemInfoList: View {
 
     // MARK: - Actions
 
-    private var actionsSection: some View {
+    private func actionsSection(existingFiles: [URL]) -> some View {
         Section {
-            if let url = item.existingOutputURL {
+            if !existingFiles.isEmpty {
                 Button {
-                    onOpen(url)
+                    onOpen(existingFiles)
                 } label: {
                     Label("Open", systemImage: "eye")
                 }
-                ShareLink(item: url) {
-                    Label("Share", systemImage: "square.and.arrow.up")
+                ShareLink(items: existingFiles) {
+                    Label(existingFiles.count > 1 ? "Share \(existingFiles.count) Files" : "Share", systemImage: "square.and.arrow.up")
                 }
             }
             Button {
                 TextCopier.copy(item.sourceURL)
-                model.composer.showStatus("Link copied.")
+                model.status.show("Link copied.")
             } label: {
                 Label("Copy Link", systemImage: "link")
             }
             if item.canRetry {
                 Button {
-                    model.queue.retry(item)
+                    model.retry(item)
                 } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
                 }

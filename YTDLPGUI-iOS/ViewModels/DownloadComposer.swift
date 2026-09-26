@@ -28,6 +28,7 @@ final class DownloadComposer {
     var urlText: String = "" {
         didSet {
             guard urlText != oldValue else { return }
+            detectedURLs = URLDetection.urlsFromLines(urlText)
             analyzeWhenReady = false
             // Any previous analysis describes a different link now.
             if analysis != .idle, detectedURLs != analyzedURL.map({ [$0] }) {
@@ -38,15 +39,12 @@ final class DownloadComposer {
 
     var options: DownloadOptions
     private(set) var analysis: AnalysisState = .idle
-    /// A transient message, e.g. after queueing several links at once.
-    private(set) var statusMessage: String?
     /// Output from the most recent analysis, for "Show Details" on a failure.
     private(set) var analysisLog: [String] = []
 
     @ObservationIgnored private var analyzedURL: String?
     @ObservationIgnored private var analysisJobID: UUID?
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
-    @ObservationIgnored private var statusMessageTask: Task<Void, Never>?
     /// Set when a pasted link should be analysed but the engine is still starting.
     @ObservationIgnored private var analyzeWhenReady = false
 
@@ -56,6 +54,8 @@ final class DownloadComposer {
     private let cookies: CookieStore
     private let analyzer: any AnalysisEngine
     private let resolver: DownloadOptionsResolver
+    /// Where messages such as "Added 3 downloads to the queue." go.
+    private let status: StatusCenter
 
     init(
         settings: AppSettings,
@@ -63,23 +63,27 @@ final class DownloadComposer {
         queue: DownloadQueue,
         storage: StorageManager,
         cookies: CookieStore,
-        analyzer: any AnalysisEngine
+        resolver: DownloadOptionsResolver,
+        analyzer: any AnalysisEngine,
+        status: StatusCenter
     ) {
         self.settings = settings
         self.engine = engine
         self.queue = queue
         self.cookies = cookies
         self.analyzer = analyzer
-        self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
-        self.options = Self.editableOptions(from: settings.storedOptions, downloadsDirectory: storage.downloadsDirectory)
+        self.status = status
+        self.resolver = resolver
+        self.options = DownloadOptionsResolver.editable(settings.storedOptions, downloadsDirectory: storage.downloadsDirectory)
     }
 
     // MARK: - Derived state
 
     /// The links in the field. More than one means the text was a list or a paragraph.
-    var detectedURLs: [String] {
-        URLDetection.urlsFromLines(urlText)
-    }
+    ///
+    /// Worked out once per change of `urlText`, its only input: finding links in free text
+    /// creates a data detector, and the Download screen reads this many times per keystroke.
+    private(set) var detectedURLs: [String] = []
 
     var hasValidURL: Bool { !detectedURLs.isEmpty }
 
@@ -101,7 +105,8 @@ final class DownloadComposer {
     }
 
     /// The yt-dlp arguments that will be used, shell-quoted, for the preview. Built from the same
-    /// resolved options and capabilities the queue uses, so it is the real argument vector.
+    /// resolved options and capabilities the queue uses, so it is the real argument vector, with
+    /// passwords and other credentials shown as `PRIVATE`.
     var commandPreview: String {
         let url = detectedURLs.first ?? "URL"
         let arguments = ArgumentBuilder.embeddedDownloadArguments(
@@ -109,7 +114,7 @@ final class DownloadComposer {
             options: resolver.resolve(options),
             capabilities: engine.capabilities
         )
-        return ShellQuoting.commandLine(executable: "yt-dlp", arguments: arguments)
+        return ShellQuoting.commandLine(executable: "yt-dlp", arguments: ShellQuoting.redactingSecrets(arguments))
     }
 
     /// Warnings worth showing before the user downloads.
@@ -179,7 +184,7 @@ final class DownloadComposer {
         let urls = URLDetection.urlsFromLines(text)
         guard !urls.isEmpty else {
             urlText = text
-            showStatus("No web address was found in that text.")
+            status.show("No web address was found in that text.")
             return
         }
         abandonAnalysis()
@@ -195,7 +200,7 @@ final class DownloadComposer {
     /// Replaces the options, e.g. with those of a history entry. Paths and anything the embedded
     /// engine refuses are dropped; the app fills in its own when downloading.
     func loadOptions(_ options: DownloadOptions) {
-        var editable = Self.editableOptions(from: options, downloadsDirectory: self.options.outputDirectory)
+        var editable = DownloadOptionsResolver.editable(options, downloadsDirectory: self.options.outputDirectory)
         editable.customArguments = DownloadOptionsResolver.sanitizedCustomArguments(options.customArguments).arguments
         self.options = editable
     }
@@ -215,7 +220,7 @@ final class DownloadComposer {
         urlText = ""
         analysisLog = []
         analyzeWhenReady = false
-        dismissStatus()
+        status.dismiss()
     }
 
     // MARK: - Analysis
@@ -225,7 +230,7 @@ final class DownloadComposer {
         let urls = detectedURLs
         guard urls.count == 1, let url = urls.first, engine.isReady else { return }
         if let block = customArgumentBlockMessage {
-            showStatus(block)
+            status.show(block)
             return
         }
 
@@ -333,29 +338,39 @@ final class DownloadComposer {
     func startDownload() -> Bool {
         guard canDownload else {
             if let block = customArgumentBlockMessage {
-                showStatus(block)
+                status.show(block)
             } else if hasValidURL, !engine.isReady {
-                showStatus("The download engine is still starting. Try again in a moment.")
+                status.show("The download engine is still starting. Try again in a moment.")
             }
             return false
         }
 
+        // The queue fills in this install's paths as it adds each link.
         let urls = detectedURLs
-        let queuedOptions = resolver.resolve(options)
 
-        if urls.count == 1, let info = analysis.info, info.originalURL == urls[0] {
-            queue.enqueue(url: urls[0], options: queuedOptions, info: info)
-            showStatus("Added “\(info.title)” to the queue.")
+        if urls.count == 1, let url = urls.first {
+            let info = analysis.info.flatMap { $0.originalURL == url ? $0 : nil }
+            guard case .added = queue.enqueue(url: url, options: options, info: info) else {
+                // The link stays in the field, so nothing typed is lost.
+                status.show("That link is already in the queue.")
+                return false
+            }
+            if let info {
+                status.show("Added “\(info.title)” to the queue.")
+            } else {
+                status.show("Added 1 download to the queue.")
+            }
         } else {
-            let added = queue.enqueue(urls: urls, options: queuedOptions)
+            let added = queue.enqueue(urls: urls, options: options)
             switch added.count {
-            case 0: showStatus("Those downloads are already in the queue.")
-            case 1: showStatus("Added 1 download to the queue.")
-            default: showStatus("Added \(added.count) downloads to the queue.")
+            case 0: status.show("Those downloads are already in the queue.")
+            case 1: status.show("Added 1 download to the queue.")
+            default: status.show("Added \(added.count) downloads to the queue.")
             }
         }
 
-        // The person's own choices, not the resolved copy, so no path is remembered.
+        // The Download screen is where options are chosen, so this is the one place that
+        // remembers them for next time (and for the Share sheet and Shortcuts).
         settings.rememberOptions(options)
         clearURLAfterQueueing()
         return true
@@ -415,35 +430,6 @@ final class DownloadComposer {
             option.reset(&reset)
         }
         options = reset
-    }
-
-    /// Options as the Download screen edits them: the person's choices, with the fields the
-    /// app manages cleared so they neither count as customisations nor carry stale paths.
-    private static func editableOptions(from options: DownloadOptions, downloadsDirectory: URL) -> DownloadOptions {
-        var editable = options
-        editable.outputDirectory = downloadsDirectory
-        editable.downloadArchivePath = ""
-        editable.cookieFilePath = ""
-        editable.cookieBrowser = .none
-        editable.ignoreUserConfig = true
-        return editable
-    }
-
-    // MARK: - Status banner
-
-    func showStatus(_ message: String) {
-        statusMessage = message
-        statusMessageTask?.cancel()
-        statusMessageTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(4))
-            guard !Task.isCancelled else { return }
-            self?.statusMessage = nil
-        }
-    }
-
-    func dismissStatus() {
-        statusMessageTask?.cancel()
-        statusMessage = nil
     }
 }
 
