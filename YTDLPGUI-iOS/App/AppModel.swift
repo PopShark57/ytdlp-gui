@@ -55,6 +55,9 @@ final class AppModel {
     /// The queue item whose details are showing, if any. Setting it navigates there.
     var focusedQueueItemID: DownloadItem.ID?
 
+    /// The history entry whose details are showing, if any. Setting it navigates there.
+    var focusedHistoryEntryID: HistoryEntry.ID?
+
     /// Whether the clipboard appears to hold a web link the user hasn't been offered yet.
     ///
     /// Detected with `UIPasteboard.detectPatterns`, which does not read the clipboard and so
@@ -155,7 +158,7 @@ final class AppModel {
             queue?.interruptActiveDownloads()
         }
         notifications.onOpenDownload = { [weak self] id in
-            self?.showQueueItem(id)
+            self?.openDownload(id)
         }
     }
 
@@ -399,6 +402,29 @@ final class AppModel {
     func showQueueItem(_ id: DownloadItem.ID) {
         selectedTab = .queue
         focusedQueueItemID = id
+    }
+
+    /// Shows a history entry's details.
+    func showHistoryEntry(_ id: HistoryEntry.ID) {
+        selectedTab = .history
+        focusedHistoryEntryID = id
+    }
+
+    /// Shows the download a notification was about: in the queue while it is still there,
+    /// otherwise its history entry. The queue forgets finished downloads when the app is
+    /// relaunched (iOS often ends a backgrounded app after the notification was posted) or when
+    /// they are cleared, but history keeps them.
+    func openDownload(_ id: DownloadItem.ID) {
+        if queue.item(withID: id) != nil {
+            showQueueItem(id)
+        } else if let entry = history.entries.first(where: { $0.downloadID == id }) {
+            // Newest first, so a retried download opens its latest attempt.
+            showHistoryEntry(entry.id)
+        } else {
+            selectedTab = .history
+            focusedHistoryEntryID = nil
+            composer.showStatus("That download is no longer in the queue or the history.")
+        }
     }
 
     /// Whether leaving now would interrupt running downloads.

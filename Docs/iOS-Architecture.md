@@ -256,8 +256,11 @@ The iOS app mirrors the macOS app's structure and names; each type is the iOS co
 the macOS one.
 
 - **`AppModel`** — composition root, in the SwiftUI environment. Owns everything below; tracks the
-  selected tab (`AppTab`: download, queue, history, settings); handles `ytdlpgui://` links, the
-  Share extension inbox, scene-phase changes and the clipboard suggestion.
+  selected tab (`AppTab`: download, queue, history, settings) and the queue item and history
+  entry being shown; handles `ytdlpgui://` links, the Share extension inbox, scene-phase changes
+  and the clipboard suggestion. A tap on a download notification goes through `openDownload`:
+  the queue item while the queue has it, otherwise the history entry whose `downloadID` matches,
+  since the queue forgets finished downloads when the app is relaunched or they're cleared.
 - **`EngineController`** — the counterpart of `Toolchain`: engine state (starting, ready, failed),
   versions, the capabilities used for argument building, and yt-dlp updates.
 - **`DownloadComposer`** — the Download screen: URL text, analysis, options, advisories, command

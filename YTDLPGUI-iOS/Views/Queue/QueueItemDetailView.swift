@@ -74,6 +74,12 @@ struct QueueItemDetailView: View {
         }
         .onAppear {
             retainedItem = model.queue.item(withID: itemID)
+            // Opened for a download the queue doesn't have (it was cleared, or the app was
+            // relaunched since): go back rather than leave "Download Removed" up. Notification
+            // taps go through `AppModel.openDownload`, which shows such a download in History.
+            if retainedItem == nil, model.focusedQueueItemID == itemID {
+                model.focusedQueueItemID = nil
+            }
         }
         .onChange(of: isInQueue) { _, isInQueue in
             if !isInQueue, model.focusedQueueItemID == itemID {

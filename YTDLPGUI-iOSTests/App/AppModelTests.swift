@@ -326,6 +326,58 @@ struct AppModelTests {
         #expect(!model.enqueueFromShortcut(url: url, kind: nil))
     }
 
+    @Test("A notification opens its download in the queue while the queue still has it")
+    func openDownloadInQueue() async throws {
+        let env = try AppTestEnvironment()
+        let model = env.makeAppModel()
+        let item = model.queue.enqueue(url: url, options: DownloadOptions()).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+        job.succeed()
+        try await waitUntil("completion") { item.state == .completed }
+        model.selectedTab = .download
+
+        model.openDownload(item.id)
+        #expect(model.selectedTab == .queue)
+        #expect(model.focusedQueueItemID == item.id)
+        #expect(model.focusedHistoryEntryID == nil)
+    }
+
+    @Test("A notification opens the history entry once the queue has forgotten the download")
+    func openDownloadInHistory() async throws {
+        let env = try AppTestEnvironment()
+        let model = env.makeAppModel()
+        let item = model.queue.enqueue(url: url, options: DownloadOptions()).item
+        let firstJob = try #require(try await waitForJobs(1, on: env.downloader).first)
+        firstJob.fail()
+        try await waitUntil("failure") { item.state == .failed }
+        // Retried, so two entries share the download's ID; the newest is the one to show.
+        model.retry(item)
+        let secondJob = try #require(try await waitForJobs(2, on: env.downloader).last)
+        secondJob.succeed()
+        try await waitUntil("completion") { item.state == .completed }
+        #expect(env.history.entries.filter { $0.downloadID == item.id }.count == 2)
+        let latest = try #require(env.history.entries.first)
+        #expect(latest.succeeded)
+
+        // As after "Clear Finished", or a relaunch: the queue no longer has it.
+        model.queue.clearFinished()
+        model.openDownload(item.id)
+        #expect(model.selectedTab == .history)
+        #expect(model.focusedHistoryEntryID == latest.id)
+        #expect(model.focusedQueueItemID == nil)
+    }
+
+    @Test("A notification about a download that is gone opens History without a detail screen")
+    func openUnknownDownload() throws {
+        let env = try AppTestEnvironment()
+        let model = env.makeAppModel()
+        model.openDownload(UUID())
+        #expect(model.selectedTab == .history)
+        #expect(model.focusedHistoryEntryID == nil)
+        #expect(model.focusedQueueItemID == nil)
+        #expect(model.composer.statusMessage != nil)
+    }
+
     @Test("Showing a queue item selects it on the Queue tab")
     func showQueueItem() throws {
         let env = try AppTestEnvironment()

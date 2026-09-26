@@ -14,7 +14,7 @@ struct HistoryView: View {
     private var history: HistoryStore { model.history }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: path) {
             Group {
                 if history.entries.isEmpty {
                     emptyState
@@ -50,6 +50,16 @@ struct HistoryView: View {
         }
         .quickLookFiles($previewFiles)
         .modifier(PhotoSaveErrorAlert(errorMessage: $photoError))
+    }
+
+    /// The navigation path mirrors `focusedHistoryEntryID`, so setting it anywhere in the app
+    /// (a notification about a finished download) shows that entry, and going back clears it.
+    private var path: Binding<[HistoryEntry.ID]> {
+        Binding {
+            model.focusedHistoryEntryID.map { [$0] } ?? []
+        } set: { newPath in
+            model.focusedHistoryEntryID = newPath.last
+        }
     }
 
     // MARK: - List
