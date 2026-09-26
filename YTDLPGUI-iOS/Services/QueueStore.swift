@@ -24,7 +24,7 @@ struct QueueStore: Sendable {
 
     let fileURL: URL
 
-    private static let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI.iOS", category: "queue")
+    private static let logger = AppLog.queue
 
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultFileURL()

@@ -45,7 +45,7 @@ final class BackgroundActivity {
     private let setIdleTimerDisabled: (Bool) -> Void
     /// Off in tests, which run outside an app that could be given background time.
     private let requestsBackgroundTime: Bool
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI.iOS", category: "background")
+    private let logger = AppLog.background
 
     private var phase: ScenePhase = .active
     private var activity = QueueActivity.idle

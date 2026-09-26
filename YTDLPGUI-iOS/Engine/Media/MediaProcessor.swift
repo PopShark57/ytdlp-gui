@@ -85,5 +85,5 @@ final class MediaProcessor: MediaProcessing {
 }
 
 enum MediaLog {
-    static let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI", category: "media")
+    static let logger = AppLog.media
 }

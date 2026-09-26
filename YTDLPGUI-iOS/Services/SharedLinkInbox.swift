@@ -34,7 +34,7 @@ enum SharedLinkInbox {
     /// The only format version there is.
     static let formatVersion = 1
 
-    private static let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI", category: "share-inbox")
+    private static let logger = AppLog.shareInbox
 
     /// The inbox folder inside the App Group container, or `nil` when the container is unavailable.
     static var inboxDirectory: URL? {

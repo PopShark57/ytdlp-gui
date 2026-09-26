@@ -27,7 +27,7 @@ final class CookieStore {
     let storedFileURL: URL
 
     private let defaults: UserDefaults
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI.iOS", category: "cookies")
+    private let logger = AppLog.cookies
 
     private static let summaryKey = "importedCookiesSummary"
     /// Real cookie exports are a few hundred kilobytes at most; anything far larger was picked

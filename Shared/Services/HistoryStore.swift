@@ -37,7 +37,7 @@ final class HistoryStore {
     private(set) var hasMissingFiles = false
 
     private let fileURL: URL
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI", category: "history")
+    private let logger = AppLog.history
     private var saveTask: Task<Void, Never>?
 
     /// Older entries beyond this count are dropped on save.

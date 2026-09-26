@@ -27,7 +27,7 @@ final class YTDLPEngine: Sendable {
     private let hub = EngineCallbackHub.shared
     private let startPhase = Mutex(StartPhase.idle)
     private let restartRequired = Mutex(false)
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI", category: "engine")
+    private let logger = AppLog.engine
 
     /// - Parameters:
     ///   - configuration: where the runtime and the engine's data live.

@@ -62,7 +62,7 @@ struct JavaScriptChallengeRunner: Sendable {
     /// What yt-dlp's host asks for; a large player takes several seconds without a JIT.
     static let defaultTimeout: Duration = .seconds(60)
 
-    private static let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI", category: "javascript")
+    private static let logger = AppLog.javaScript
 
     /// Limits how many scripts evaluate at once, abandoned ones included.
     let slots: JavaScriptEvaluationSlots

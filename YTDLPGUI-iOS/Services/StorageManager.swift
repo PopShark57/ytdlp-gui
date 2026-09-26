@@ -33,7 +33,7 @@ final class StorageManager {
     @ObservationIgnored
     var isPartialDownloadInUse: @MainActor () -> Bool = { false }
 
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI.iOS", category: "storage")
+    private let logger = AppLog.storage
 
     init(
         documentsDirectory: URL? = nil,

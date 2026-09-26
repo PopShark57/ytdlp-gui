@@ -84,7 +84,7 @@ struct EngineConfiguration: Sendable {
 /// Python starts (`prepareUpdatesForLaunch()`).
 extension EngineConfiguration {
 
-    private static let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI", category: "engine")
+    private static let logger = AppLog.engine
 
     /// Holds one folder per installed update.
     var versionsDirectory: URL {

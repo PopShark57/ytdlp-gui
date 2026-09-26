@@ -326,6 +326,16 @@ starts (`EngineConfiguration.prepareUpdatesForLaunch`). That step also moves an 
 by an earlier build, which lived directly in `Engine/yt-dlp/`, into a folder of its own and keeps
 using it. Installing and reverting are therefore safe while downloads run.
 
+## Logging
+
+Everything the app logs goes to one subsystem, its bundle identifier
+(`io.github.ytdlpgui.YTDLPGUI.iOS`), through the loggers in `Shared/Utilities/AppLog.swift`, one
+category per area: `engine`, `javascript`, `media`, `queue`, `history`, `notifications`,
+`background`, `storage`, `cookies`, `share-inbox`. The queue logs each download's transitions
+(queued, started as job …, cancelled, interrupted, resumed, completed, failed) with its item and
+job IDs; links are private. To follow a device from a Mac:
+`log stream --device --predicate 'subsystem == "io.github.ytdlpgui.YTDLPGUI.iOS"' --level info`.
+
 ## Testing
 
 - `Shared/` logic is covered by the macOS test suite (`xcodebuild test -scheme YTDLPGUI`), which

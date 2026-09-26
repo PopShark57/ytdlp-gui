@@ -81,7 +81,7 @@ final class DownloadQueue {
     private let library: MediaLibrary
     private let resolver: DownloadOptionsResolver
     private let store: QueueStore
-    private let logger = Logger(subsystem: "io.github.ytdlpgui.YTDLPGUI.iOS", category: "queue")
+    private let logger = AppLog.queue
 
     /// Running work, keyed by item id. Kept out of `DownloadItem` so the model stays a plain
     /// value-ish object that SwiftUI can diff cheaply.
@@ -168,6 +168,7 @@ final class DownloadQueue {
             playlistCount: info?.playlistCount
         )
         items.append(item)
+        logger.info("Queued \(item.id.uuidString, privacy: .public): \(url, privacy: .private)")
         queueDidChange()
         return .added(item)
     }
@@ -191,6 +192,7 @@ final class DownloadQueue {
             // final events still in flight.
             cancelRequested.insert(item.id)
             interruptedIDs.remove(item.id)
+            logger.info("Cancelling \(item.id.uuidString, privacy: .public) (job \(self.jobIDs[item.id]?.uuidString ?? "not started", privacy: .public))")
             if let jobID = jobIDs[item.id] {
                 downloader.cancel(jobID: jobID)
             }
@@ -263,6 +265,7 @@ final class DownloadQueue {
     }
 
     private func prepareForRetry(_ item: DownloadItem) {
+        logger.info("Queued \(item.id.uuidString, privacy: .public) again (was \(item.state.rawValue, privacy: .public))")
         interruptedIDs.remove(item.id)
         resumableIDs.remove(item.id)
         photoSaveStates[item.id] = nil
@@ -286,6 +289,7 @@ final class DownloadQueue {
     /// waiting, and nothing new starts until `resumeInterruptedDownloads()`.
     func interruptActiveDownloads() {
         isSuspended = true
+        logger.notice("Background time ran out: stopping \(self.activeCount, privacy: .public) download(s) until the app returns")
         for item in activeItems {
             interruptedIDs.insert(item.id)
             cancelRequested.insert(item.id)
@@ -300,6 +304,7 @@ final class DownloadQueue {
     /// foreground; does nothing if nothing was interrupted.
     func resumeInterruptedDownloads() {
         guard isSuspended || !interruptedIDs.isEmpty else { return }
+        logger.info("Back in the foreground: resuming \(self.interruptedIDs.count, privacy: .public) interrupted download(s)")
         isSuspended = false
         for item in items where item.state == .cancelled && interruptedIDs.contains(item.id) {
             prepareForRetry(item)
@@ -417,6 +422,7 @@ final class DownloadQueue {
 
         let jobID = UUID()
         jobIDs[item.id] = jobID
+        logger.info("Started \(item.id.uuidString, privacy: .public) as job \(jobID.uuidString, privacy: .public)")
         var tracker = OutputTracker(outputDirectory: options.outputDirectory)
         var result: EngineJobResult?
 
@@ -617,14 +623,16 @@ final class DownloadQueue {
         resumableIDs.remove(item.id)
         finishedSinceIdle += 1
 
+        let job = jobIDs[item.id]?.uuidString ?? "none"
         if let failure {
             item.state = .failed
             item.phase = .failed
             failedSinceIdle += 1
-            logger.error("Download failed: \(failure.title, privacy: .public)")
+            logger.error("Failed \(item.id.uuidString, privacy: .public) (job \(job, privacy: .public)): \(failure.title, privacy: .public)")
         } else {
             item.state = .completed
             item.phase = .completed
+            logger.info("Completed \(item.id.uuidString, privacy: .public) (job \(job, privacy: .public)): \(item.outputURLs.count, privacy: .public) file(s)")
             if item.progress.fractionCompleted == nil {
                 item.progress.totalBytes = item.completedFileSize
                 item.progress.downloadedBytes = item.completedFileSize
@@ -668,6 +676,7 @@ final class DownloadQueue {
         item.phase = .cancelled
         item.finishedAt = Date()
         finishedSinceIdle += 1
+        logger.info("Cancelled \(item.id.uuidString, privacy: .public)\(self.interruptedIDs.contains(item.id) ? " by the system; it resumes later" : "", privacy: .public)")
 
         if interruptedIDs.contains(item.id) {
             resumableIDs.insert(item.id)
