@@ -23,7 +23,7 @@ struct AppModelTests {
 
         model.handleOpenURL(try #require(URL(string: "ytdlpgui://download?url=javascript%3Aalert(1)")))
         #expect(model.composer.urlText == "https://example.com/song")
-        #expect(model.composer.statusMessage == "That link didn't include a web address to download.")
+        #expect(model.status.message == "That link didn't include a web address to download.")
     }
 
     @Test("Shared links with a kind are queued; links without one go to the URL field")
@@ -46,7 +46,7 @@ struct AppModelTests {
         #expect(model.queue.items.allSatisfy { $0.options.outputDirectory == env.storage.downloadsDirectory })
         #expect(model.composer.urlText == "https://example.com/c")
         #expect(model.selectedTab == .download)
-        #expect(model.composer.statusMessage == "Added 2 shared links to the queue.")
+        #expect(model.status.message == "Added 2 shared links to the queue.")
 
         // Draining again finds nothing new.
         model.handleScenePhaseChange(.inactive)
@@ -61,7 +61,7 @@ struct AppModelTests {
         let model = env.makeAppModel()
         model.handleScenePhaseChange(.active)
         #expect(model.selectedTab == .queue)
-        #expect(model.composer.statusMessage == "Added a shared link to the queue.")
+        #expect(model.status.message == "Added a shared link to the queue.")
     }
 
     @Test("A clipboard link is offered once per copy, only into an empty field")
@@ -141,8 +141,8 @@ struct AppModelTests {
         #expect(item.options.kind == .audio)
         #expect(item.options.outputDirectory == env.storage.downloadsDirectory)
         #expect(item.options.customArguments == "--no-mtime")
-        #expect(model.composer.statusMessage?.contains("‘--exec’") == true)
-        #expect(model.composer.statusMessage?.contains("‘--cookies-from-browser’") == true)
+        #expect(model.status.message?.contains("‘--exec’") == true)
+        #expect(model.status.message?.contains("‘--cookies-from-browser’") == true)
     }
 
     @Test("Download Again shows the existing item when the link is already queued")
@@ -158,7 +158,7 @@ struct AppModelTests {
         #expect(model.queue.items.count == 1)
         #expect(model.selectedTab == .queue)
         #expect(model.focusedQueueItemID == existing.id)
-        #expect(model.composer.statusMessage == "That link is already in the queue.")
+        #expect(model.status.message == "That link is already in the queue.")
         try await Task.sleep(for: .milliseconds(50))
         #expect(env.downloader.jobs.count == 1)
     }
@@ -175,12 +175,12 @@ struct AppModelTests {
 
         model.retry(failed)
         #expect(failed.state == .failed)
-        #expect(model.composer.statusMessage == "That link is already in the queue.")
+        #expect(model.status.message == "That link is already in the queue.")
 
-        model.composer.dismissStatus()
+        model.status.dismiss()
         model.retryAllFailed()
         #expect(failed.state == .failed)
-        #expect(model.composer.statusMessage == "One download wasn't retried because its link is already in the queue.")
+        #expect(model.status.message == "One download wasn't retried because its link is already in the queue.")
     }
 
     @Test("Download Again and Edit Options say which credentials history left out")
@@ -196,13 +196,13 @@ struct AppModelTests {
         )
 
         model.loadIntoComposer(entry)
-        #expect(model.composer.statusMessage?.contains("‘--password’") == true)
-        #expect(model.composer.statusMessage?.contains("Advanced Options") == true)
+        #expect(model.status.message?.contains("‘--password’") == true)
+        #expect(model.status.message?.contains("Advanced Options") == true)
 
-        model.composer.dismissStatus()
+        model.status.dismiss()
         model.downloadAgain(entry)
         #expect(model.queue.items.count == 1)
-        #expect(model.composer.statusMessage?.contains("‘--password’") == true)
+        #expect(model.status.message?.contains("‘--password’") == true)
     }
 
     @Test("Launch removes credentials an older build kept in history")
@@ -242,8 +242,8 @@ struct AppModelTests {
         #expect(model.composer.options.cookieFilePath.isEmpty)
         #expect(model.composer.options.downloadArchivePath.isEmpty)
         #expect(model.composer.options.customArguments == "--no-mtime")
-        #expect(model.composer.statusMessage?.contains("‘--exec’") == true)
-        #expect(model.composer.statusMessage?.contains("‘--update’") == true)
+        #expect(model.status.message?.contains("‘--exec’") == true)
+        #expect(model.status.message?.contains("‘--update’") == true)
         #expect(model.queue.items.isEmpty)
         // "Edit Options and Download" never becomes the remembered options by itself.
         #expect(env.settings.storedOptions.customArguments.isEmpty)
@@ -260,7 +260,7 @@ struct AppModelTests {
         model.loadIntoComposer(entry)
         #expect(model.composer.options.kind == .audio)
         #expect(model.composer.urlText == url)
-        #expect(model.composer.statusMessage == nil)
+        #expect(model.status.message == nil)
     }
 
     @Test("A loaded history entry is analysed when automatic analysis is on")
@@ -375,7 +375,7 @@ struct AppModelTests {
         #expect(model.selectedTab == .history)
         #expect(model.focusedHistoryEntryID == nil)
         #expect(model.focusedQueueItemID == nil)
-        #expect(model.composer.statusMessage != nil)
+        #expect(model.status.message != nil)
     }
 
     @Test("Showing a queue item selects it on the Queue tab")

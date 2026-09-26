@@ -330,7 +330,7 @@ private struct QueueItemInfoList: View {
             }
             Button {
                 TextCopier.copy(item.sourceURL)
-                model.composer.showStatus("Link copied.")
+                model.status.show("Link copied.")
             } label: {
                 Label("Copy Link", systemImage: "link")
             }

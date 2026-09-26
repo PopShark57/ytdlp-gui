@@ -53,7 +53,7 @@ struct HistoryEntryActionItems: View {
 
         Button {
             TextCopier.copy(entry.sourceURL)
-            model.composer.showStatus("Link copied.")
+            model.status.show("Link copied.")
         } label: {
             Label("Copy Link", systemImage: "link")
         }
@@ -71,7 +71,7 @@ func saveHistoryFilesToPhotos(_ files: [URL], model: AppModel, errorMessage: Bin
     Task {
         do {
             let saved = try await model.library.saveToPhotos(files)
-            model.composer.showStatus(saved > 1 ? "Saved \(saved) files to Photos." : "Saved to Photos.")
+            model.status.show(saved > 1 ? "Saved \(saved) files to Photos." : "Saved to Photos.")
         } catch {
             errorMessage.wrappedValue = error.localizedDescription
         }

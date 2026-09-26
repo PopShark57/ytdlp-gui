@@ -39,15 +39,12 @@ final class DownloadComposer {
 
     var options: DownloadOptions
     private(set) var analysis: AnalysisState = .idle
-    /// A transient message, e.g. after queueing several links at once.
-    private(set) var statusMessage: String?
     /// Output from the most recent analysis, for "Show Details" on a failure.
     private(set) var analysisLog: [String] = []
 
     @ObservationIgnored private var analyzedURL: String?
     @ObservationIgnored private var analysisJobID: UUID?
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
-    @ObservationIgnored private var statusMessageTask: Task<Void, Never>?
     /// Set when a pasted link should be analysed but the engine is still starting.
     @ObservationIgnored private var analyzeWhenReady = false
 
@@ -57,6 +54,8 @@ final class DownloadComposer {
     private let cookies: CookieStore
     private let analyzer: any AnalysisEngine
     private let resolver: DownloadOptionsResolver
+    /// Where messages such as "Added 3 downloads to the queue." go.
+    private let status: StatusCenter
 
     init(
         settings: AppSettings,
@@ -64,13 +63,15 @@ final class DownloadComposer {
         queue: DownloadQueue,
         storage: StorageManager,
         cookies: CookieStore,
-        analyzer: any AnalysisEngine
+        analyzer: any AnalysisEngine,
+        status: StatusCenter
     ) {
         self.settings = settings
         self.engine = engine
         self.queue = queue
         self.cookies = cookies
         self.analyzer = analyzer
+        self.status = status
         self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
         self.options = Self.editableOptions(from: settings.storedOptions, downloadsDirectory: storage.downloadsDirectory)
     }
@@ -182,7 +183,7 @@ final class DownloadComposer {
         let urls = URLDetection.urlsFromLines(text)
         guard !urls.isEmpty else {
             urlText = text
-            showStatus("No web address was found in that text.")
+            status.show("No web address was found in that text.")
             return
         }
         abandonAnalysis()
@@ -218,7 +219,7 @@ final class DownloadComposer {
         urlText = ""
         analysisLog = []
         analyzeWhenReady = false
-        dismissStatus()
+        status.dismiss()
     }
 
     // MARK: - Analysis
@@ -228,7 +229,7 @@ final class DownloadComposer {
         let urls = detectedURLs
         guard urls.count == 1, let url = urls.first, engine.isReady else { return }
         if let block = customArgumentBlockMessage {
-            showStatus(block)
+            status.show(block)
             return
         }
 
@@ -336,9 +337,9 @@ final class DownloadComposer {
     func startDownload() -> Bool {
         guard canDownload else {
             if let block = customArgumentBlockMessage {
-                showStatus(block)
+                status.show(block)
             } else if hasValidURL, !engine.isReady {
-                showStatus("The download engine is still starting. Try again in a moment.")
+                status.show("The download engine is still starting. Try again in a moment.")
             }
             return false
         }
@@ -350,20 +351,20 @@ final class DownloadComposer {
             let info = analysis.info.flatMap { $0.originalURL == url ? $0 : nil }
             guard case .added = queue.enqueue(url: url, options: queuedOptions, info: info) else {
                 // The link stays in the field, so nothing typed is lost.
-                showStatus("That link is already in the queue.")
+                status.show("That link is already in the queue.")
                 return false
             }
             if let info {
-                showStatus("Added “\(info.title)” to the queue.")
+                status.show("Added “\(info.title)” to the queue.")
             } else {
-                showStatus("Added 1 download to the queue.")
+                status.show("Added 1 download to the queue.")
             }
         } else {
             let added = queue.enqueue(urls: urls, options: queuedOptions)
             switch added.count {
-            case 0: showStatus("Those downloads are already in the queue.")
-            case 1: showStatus("Added 1 download to the queue.")
-            default: showStatus("Added \(added.count) downloads to the queue.")
+            case 0: status.show("Those downloads are already in the queue.")
+            case 1: status.show("Added 1 download to the queue.")
+            default: status.show("Added \(added.count) downloads to the queue.")
             }
         }
 
@@ -439,23 +440,6 @@ final class DownloadComposer {
         editable.cookieBrowser = .none
         editable.ignoreUserConfig = true
         return editable
-    }
-
-    // MARK: - Status banner
-
-    func showStatus(_ message: String) {
-        statusMessage = message
-        statusMessageTask?.cancel()
-        statusMessageTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(4))
-            guard !Task.isCancelled else { return }
-            self?.statusMessage = nil
-        }
-    }
-
-    func dismissStatus() {
-        statusMessageTask?.cancel()
-        statusMessage = nil
     }
 }
 

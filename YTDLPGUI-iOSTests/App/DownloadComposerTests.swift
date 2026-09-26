@@ -36,12 +36,12 @@ struct DownloadComposerTests {
         #expect(composer.canAnalyze)
 
         composer.setURLText("no links here", analyzeIfEnabled: true)
-        #expect(composer.statusMessage == "No web address was found in that text.")
+        #expect(env.status.message == "No web address was found in that text.")
         #expect(!composer.hasValidURL)
 
         composer.clear()
         #expect(composer.urlText.isEmpty)
-        #expect(composer.statusMessage == nil)
+        #expect(env.status.message == nil)
     }
 
     @Test("Nothing can be analysed or downloaded until the engine is ready")
@@ -249,7 +249,7 @@ struct DownloadComposerTests {
         #expect(composer.options.audioFormat == .opus)
         #expect(env.settings.storedOptions.cookieFilePath.isEmpty)
         #expect(composer.urlText.isEmpty)
-        #expect(composer.statusMessage == "Added 1 download to the queue.")
+        #expect(env.status.message == "Added 1 download to the queue.")
     }
 
     @Test("An analysed link that is already queued isn't queued again, and stays in the field")
@@ -260,13 +260,13 @@ struct DownloadComposerTests {
         composer.setURLText(url, analyzeIfEnabled: true)
         try await waitUntil("analysis") { composer.analysis.info != nil }
         #expect(composer.startDownload())
-        #expect(composer.statusMessage == "Added “Sample Clip” to the queue.")
+        #expect(env.status.message == "Added “Sample Clip” to the queue.")
         _ = try await waitForJobs(1, on: env.downloader)
 
         composer.setURLText(url, analyzeIfEnabled: true)
         try await waitUntil("second analysis") { composer.analysis.info != nil }
         #expect(!composer.startDownload())
-        #expect(composer.statusMessage == "That link is already in the queue.")
+        #expect(env.status.message == "That link is already in the queue.")
         #expect(composer.urlText == url)
         #expect(env.queue.items.count == 1)
         try await Task.sleep(for: .milliseconds(50))
@@ -284,7 +284,7 @@ struct DownloadComposerTests {
         #expect(!composer.canDownload)
         #expect(!composer.canAnalyze)
         #expect(!composer.startDownload())
-        #expect(composer.statusMessage == composer.customArgumentBlockMessage)
+        #expect(env.status.message == composer.customArgumentBlockMessage)
         #expect(env.queue.items.isEmpty)
         #expect(!composer.commandPreview.contains("--js-runtimes"))
     }
@@ -342,7 +342,8 @@ struct DownloadComposerTests {
             queue: env.queue,
             storage: env.storage,
             cookies: env.cookies,
-            analyzer: env.analyzer
+            analyzer: env.analyzer,
+            status: env.status
         )
         #expect(composer.options.kind == .audio)
         #expect(composer.options.cookieFilePath.isEmpty)

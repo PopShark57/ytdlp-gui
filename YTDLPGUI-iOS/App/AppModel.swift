@@ -49,6 +49,8 @@ final class AppModel {
     let queue: DownloadQueue
     let composer: DownloadComposer
     let background: BackgroundActivity
+    /// The passing message shown over every tab.
+    let status: StatusCenter
 
     var selectedTab: AppTab = .download
 
@@ -84,6 +86,7 @@ final class AppModel {
         let history = HistoryStore()
         let notifications = NotificationService()
         let library = MediaLibrary()
+        let status = StatusCenter()
         let engine = EngineController(engine: .shared, temporaryDirectory: storage.partialDownloadsDirectory)
         let queue = DownloadQueue(
             settings: settings,
@@ -101,7 +104,8 @@ final class AppModel {
             queue: queue,
             storage: storage,
             cookies: cookies,
-            analyzer: YTDLPEngine.shared
+            analyzer: YTDLPEngine.shared,
+            status: status
         )
         self.init(
             settings: settings,
@@ -114,6 +118,7 @@ final class AppModel {
             queue: queue,
             composer: composer,
             background: BackgroundActivity(settings: settings),
+            status: status,
             clipboard: SystemClipboardLinkDetector(),
             drainSharedInbox: { SharedLinkInbox.drain() }
         )
@@ -131,6 +136,7 @@ final class AppModel {
         queue: DownloadQueue,
         composer: DownloadComposer,
         background: BackgroundActivity,
+        status: StatusCenter,
         clipboard: any ClipboardLinkDetecting,
         drainSharedInbox: @escaping () -> [SharedLink]
     ) {
@@ -144,6 +150,7 @@ final class AppModel {
         self.queue = queue
         self.composer = composer
         self.background = background
+        self.status = status
         self.clipboard = clipboard
         self.drainSharedInbox = drainSharedInbox
         self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
@@ -212,7 +219,7 @@ final class AppModel {
     func handleOpenURL(_ url: URL) {
         guard let request = DownloadLinkRequest(url: url) else {
             if url.scheme?.lowercased() == DownloadLinkRequest.scheme {
-                composer.showStatus("That link didn't include a web address to download.")
+                status.show("That link didn't include a web address to download.")
             }
             return
         }
@@ -284,7 +291,7 @@ final class AppModel {
             selectedTab = .queue
         }
         if queuedCount > 0 {
-            composer.showStatus(queuedCount == 1
+            status.show(queuedCount == 1
                 ? "Added a shared link to the queue."
                 : "Added \(queuedCount) shared links to the queue.")
         }
@@ -335,7 +342,7 @@ final class AppModel {
             item = added
         case .alreadyPending(let pending):
             showQueueItem(pending.id)
-            composer.showStatus("That link is already in the queue.")
+            status.show("That link is already in the queue.")
             return
         }
         if item.title == nil, entry.title != entry.sourceURL { item.title = entry.title }
@@ -351,7 +358,7 @@ final class AppModel {
             notes.append(Self.describeRemovedSecrets(secrets))
         }
         if !notes.isEmpty {
-            composer.showStatus(notes.joined(separator: " "))
+            status.show(notes.joined(separator: " "))
         }
     }
 
@@ -373,7 +380,7 @@ final class AppModel {
                 notes.append(Self.describeRemovedSecrets(secrets) + " Add them again in Advanced Options if they're needed.")
             }
             if !notes.isEmpty {
-                composer.showStatus(notes.joined(separator: " "))
+                status.show(notes.joined(separator: " "))
             }
         } else {
             composer.options.kind = entry.kind
@@ -387,7 +394,7 @@ final class AppModel {
     /// as another item, which is then pointed out instead.
     func retry(_ item: DownloadItem) {
         guard queue.retry(item) != nil else { return }
-        composer.showStatus("That link is already in the queue.")
+        status.show("That link is already in the queue.")
     }
 
     /// Retries every failed download, and says how many were left alone because their link is
@@ -395,7 +402,7 @@ final class AppModel {
     func retryAllFailed() {
         let skipped = queue.retryAllFailed()
         guard skipped > 0 else { return }
-        composer.showStatus(skipped == 1
+        status.show(skipped == 1
             ? "One download wasn't retried because its link is already in the queue."
             : "\(skipped) downloads weren't retried because their links are already in the queue.")
     }
@@ -425,7 +432,7 @@ final class AppModel {
         } else {
             selectedTab = .history
             focusedHistoryEntryID = nil
-            composer.showStatus("That download is no longer in the queue or the history.")
+            status.show("That download is no longer in the queue or the history.")
         }
     }
 

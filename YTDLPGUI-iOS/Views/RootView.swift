@@ -27,8 +27,8 @@ struct RootView: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .overlay(alignment: .top) {
-            StatusToastHost(message: model.composer.statusMessage) {
-                model.composer.dismissStatus()
+            StatusToastHost(message: model.status.message) {
+                model.status.dismiss()
             }
         }
     }

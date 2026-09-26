@@ -189,6 +189,7 @@ final class AppTestEnvironment {
     let analyzer = FakeAnalysisEngine()
     let runtime = FakeEngineRuntime()
     let clipboard = FakeClipboard()
+    let status = StatusCenter()
     var sharedLinks: [SharedLink] = []
 
     let settings: AppSettings
@@ -246,7 +247,8 @@ final class AppTestEnvironment {
             queue: queue,
             storage: storage,
             cookies: cookies,
-            analyzer: analyzer
+            analyzer: analyzer,
+            status: status
         )
     }
 
@@ -282,6 +284,7 @@ final class AppTestEnvironment {
             queue: queue,
             composer: composer,
             background: BackgroundActivity(settings: settings, setIdleTimerDisabled: { _ in }, requestsBackgroundTime: false),
+            status: status,
             clipboard: clipboard,
             drainSharedInbox: { [weak self] in
                 let links = self?.sharedLinks ?? []
