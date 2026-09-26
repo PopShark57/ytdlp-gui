@@ -1,8 +1,7 @@
 import Foundation
 import os
 
-/// Links handed over by the Share extension. The JSON schema is duplicated in
-/// YTDLPGUI-iOS-Share (the extension can't link the app's code) — keep the two in step.
+/// Links handed over by the Share extension.
 struct SharedLink: Equatable, Sendable {
     var urls: [String]
     var kind: DownloadKind?
@@ -11,17 +10,14 @@ struct SharedLink: Equatable, Sendable {
 
 /// Reads the links the Share extension leaves in the App Group container.
 ///
-/// Each share is one file, `Inbox/<ISO-8601 basic timestamp>-<UUID>.json`, holding
-/// `{"version": 1, "urls": [String], "kind": "video"|"audio"|null, "created": ISO-8601}`.
-/// The extension only ever creates files, atomically, and the app only ever deletes them, so
-/// the two processes never need to coordinate.
+/// Each share is one file in the format `ShareInboxFormat` describes, which both targets
+/// compile. The extension only ever creates files, atomically, and the app only ever deletes
+/// them, so the two processes never need to coordinate.
 ///
 /// Everything read here was written by another process and is treated as untrusted: anything
 /// that doesn't decode, isn't version 1 or carries no web link is deleted rather than acted on,
 /// so one bad file can never wedge the inbox.
 enum SharedLinkInbox {
-
-    static let appGroupIdentifier = "group.io.github.ytdlpgui.YTDLPGUI"
 
     /// Entries older than this are dropped unread. A link shared a week ago and never opened is
     /// more likely forgotten than wanted, and a download starting out of nowhere would surprise.
@@ -31,21 +27,11 @@ enum SharedLinkInbox {
     /// discarded without being read into memory.
     static let maximumEntrySize = 64 * 1024
 
-    /// The only format version there is.
-    static let formatVersion = 1
-
     private static let logger = AppLog.shareInbox
-
-    /// The inbox folder inside the App Group container, or `nil` when the container is unavailable.
-    static var inboxDirectory: URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)?
-            .appending(path: "Inbox", directoryHint: .isDirectory)
-    }
 
     /// Reads and deletes every pending entry, oldest first. Unreadable entries are deleted and skipped.
     static func drain() -> [SharedLink] {
-        guard let directory = inboxDirectory else {
+        guard let directory = ShareInboxFormat.inboxDirectory else {
             logger.error("The App Group container is unavailable; links from the Share extension can't be read.")
             return []
         }
@@ -137,13 +123,13 @@ enum SharedLinkInbox {
 
     /// The link an entry file describes, with anything that isn't a web link removed.
     static func decode(_ data: Data) throws(EntryError) -> SharedLink {
-        let entry: Entry
+        let entry: ShareInboxFormat.Entry
         do {
-            entry = try JSONDecoder().decode(Entry.self, from: data)
+            entry = try ShareInboxFormat.decode(data)
         } catch {
             throw .malformed
         }
-        guard entry.version == formatVersion else { throw .unsupportedVersion(entry.version) }
+        guard entry.version == ShareInboxFormat.formatVersion else { throw .unsupportedVersion(entry.version) }
         guard let created = date(fromISO8601: entry.created) else { throw .invalidDate(entry.created) }
 
         var seen = Set<String>()
@@ -174,14 +160,5 @@ enum SharedLinkInbox {
             Date.ISO8601FormatStyle(includingFractionalSeconds: true),
         ]
         return styles.lazy.compactMap { try? $0.parse(text) }.first
-    }
-
-    /// The wire format. `kind` stays a string so an unknown value becomes `nil` instead of
-    /// making the whole entry unreadable.
-    private struct Entry: Decodable {
-        var version: Int
-        var urls: [String]
-        var kind: String?
-        var created: String
     }
 }

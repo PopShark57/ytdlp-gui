@@ -34,6 +34,7 @@ YTDLPGUI-iOS/                iOS app
 ├── Services/                Settings, notifications, Photos, storage, cookies, background work
 └── Views/                   SwiftUI, grouped by screen
 YTDLPGUI-iOS-Share/          Share extension: hands links to the app through an App Group
+ShareInbox/                  The inbox format, compiled into both the app and the extension
 YTDLPGUI-iOSTests/           iOS unit and integration tests
 YTDLPGUI-iOSUITests/         UI walkthrough (live tests only)
 PythonHost/ytdlpgui_host/    The Python side of the engine (bundled into the app)
@@ -301,6 +302,8 @@ can be disabled (a setting), so the screen doesn't lock mid-download.
   `Inbox/<timestamp>-<uuid>.json`: `{"version": 1, "urls": [str], "kind": "video"|"audio"|null,
   "created": ISO-8601}`. When the app becomes active it drains the inbox: links with a `kind` are
   queued straight away with the last-used options; links without one are put in the URL field.
+  The format lives in `ShareInbox/ShareInboxFormat.swift`, a folder both targets compile, so the
+  writer (`InboxWriter`) and the reader (`SharedLinkInbox`) share one definition.
 - **URL scheme** — `ytdlpgui://download?url=<percent-encoded>&kind=video|audio` fills in the
   Download screen. It never starts a download by itself: a web page must not be able to.
 - **Shortcuts** — an App Intent, “Download with YTDLP GUI”, which the user configures explicitly

@@ -357,6 +357,7 @@ YTDLPGUI-iOS/                The iOS app
 ├── Intents/                 The Shortcuts action
 └── Views/                   SwiftUI, grouped by screen
 YTDLPGUI-iOS-Share/          Share extension
+ShareInbox/                  The Share extension's inbox format, compiled into the app too
 YTDLPGUI-iOSTests/           iOS unit and integration tests
 YTDLPGUI-iOSUITests/         UI walkthrough (live tests only)
 PythonHost/ytdlpgui_host/    The Python side of the iOS engine, bundled into the app

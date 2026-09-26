@@ -22,6 +22,31 @@ final class SharedLinkInboxTests {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    // MARK: - The shared format
+
+    @Test("What the extension writes is what the app reads")
+    func sharedFormatRoundTrip() throws {
+        let created = try Date("2026-09-20T10:15:00Z", strategy: .iso8601)
+        let entry = ShareInboxFormat.Entry(urls: ["https://example.com/a"], kind: "audio", created: created)
+        let data = try ShareInboxFormat.encode(entry)
+        #expect(String(decoding: data, as: UTF8.self)
+            == #"{"created":"2026-09-20T10:15:00Z","kind":"audio","urls":["https://example.com/a"],"version":1}"#)
+        #expect(try SharedLinkInbox.decode(data) == SharedLink(urls: ["https://example.com/a"], kind: .audio, created: created))
+
+        // No kind is written as an explicit null.
+        let withoutKind = try ShareInboxFormat.encode(ShareInboxFormat.Entry(urls: ["https://example.com/a"], kind: nil, created: created))
+        #expect(String(decoding: withoutKind, as: UTF8.self).contains(#""kind":null"#))
+        #expect(try SharedLinkInbox.decode(withoutKind).kind == nil)
+    }
+
+    @Test("Entry file names sort by age")
+    func fileNames() throws {
+        let id = try #require(UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF"))
+        #expect(ShareInboxFormat.fileName(for: now, id: id) == "20260921T141320.000Z-6F9619FF-8B86-D011-B42D-00C04FC964FF.json")
+        let names = [now.addingTimeInterval(0.5), now, now.addingTimeInterval(10)].map { ShareInboxFormat.fileName(for: $0) }
+        #expect(names.sorted() == [names[1], names[0], names[2]])
+    }
+
     // MARK: - Round trip
 
     @Test("An entry in the extension's format comes back intact, and is deleted")
