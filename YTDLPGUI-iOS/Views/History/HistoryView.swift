@@ -68,7 +68,7 @@ struct HistoryView: View {
         List {
             ForEach(filteredEntries) { entry in
                 NavigationLink(value: entry.id) {
-                    HistoryRowView(entry: entry)
+                    HistoryRowView(entry: entry, isFileMissing: history.isFileMissing(entry))
                 }
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
@@ -131,7 +131,7 @@ struct HistoryView: View {
                 } label: {
                     Label("Remove Missing Files", systemImage: "questionmark.folder")
                 }
-                .disabled(!history.entries.contains(where: \.isFileMissing))
+                .disabled(!history.hasMissingFiles)
 
                 Button(role: .destructive) {
                     if model.settings.confirmBeforeClearingHistory {

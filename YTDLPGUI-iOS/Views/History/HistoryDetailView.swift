@@ -19,6 +19,11 @@ struct HistoryDetailView: View {
         model.history.entries.first { $0.id == entryID } ?? retainedEntry
     }
 
+    /// The entry's files still on disk, as `HistoryStore` last checked.
+    private var existingFiles: [URL] {
+        entry.map { model.history.existingFiles(of: $0) } ?? []
+    }
+
     var body: some View {
         Group {
             if let entry {
@@ -38,15 +43,15 @@ struct HistoryDetailView: View {
         .onAppear {
             retainedEntry = model.history.entries.first { $0.id == entryID }
         }
-        .task(id: entryID) {
-            guard let entry else { return }
-            photoFiles = await MediaLibrary.photosCompatibleFiles(among: entry.existingOutputURLs)
+        .task(id: existingFiles) {
+            photoFiles = await MediaLibrary.photosCompatibleFiles(among: existingFiles)
         }
     }
 
     private func list(for entry: HistoryEntry) -> some View {
         let files = entry.outputURLs
-        let existingFiles = entry.existingOutputURLs
+        let status = model.history.fileStatus[entry.id]
+        let existingFiles = status?.existingURLs ?? []
         return List {
             Section {
                 header(for: entry)
@@ -88,7 +93,7 @@ struct HistoryDetailView: View {
                             .textSelection(.enabled)
                     }
                 }
-                if entry.succeeded, let warning = MissingFiles.warning(missing: files.count - existingFiles.count, of: files.count) {
+                if entry.succeeded, let status, let warning = MissingFiles.warning(missing: status.missingCount, of: status.recordedCount) {
                     WarningRow(message: warning + " Download again to get a new copy.")
                 }
                 LabeledContent("Link") {
@@ -103,7 +108,7 @@ struct HistoryDetailView: View {
             if files.count > 1 {
                 Section("Files (\(files.count))") {
                     ForEach(files, id: \.self) { file in
-                        FileNameRow(url: file, isMissing: !existingFiles.contains(file))
+                        FileNameRow(url: file, isMissing: status != nil && !existingFiles.contains(file))
                     }
                 }
             }

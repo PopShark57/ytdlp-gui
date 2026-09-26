@@ -19,7 +19,7 @@ struct HistoryEntryActionItems: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let files = entry.existingOutputURLs
+        let files = model.history.existingFiles(of: entry)
         if !files.isEmpty {
             Button {
                 onOpen(files)

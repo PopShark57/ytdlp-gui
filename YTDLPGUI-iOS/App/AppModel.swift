@@ -189,6 +189,8 @@ final class AppModel {
         switch phase {
         case .active:
             queue.resumeInterruptedDownloads()
+            // Files may have been deleted or moved back in the Files app meanwhile.
+            history.refreshFileStatus()
             receiveSharedLinks()
             Task { await checkClipboard() }
         case .background:

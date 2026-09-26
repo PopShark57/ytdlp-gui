@@ -199,18 +199,22 @@ struct DownloadQueueTests {
         #expect(entry.outputPaths == files.map { $0.path(percentEncoded: false) })
         #expect(entry.fileSizeBytes == 6_000)
         #expect(entry.outputURLs.map(\.standardizedFileURL) == files.map(\.standardizedFileURL))
-        #expect(entry.existingOutputURLs.count == 3)
-        #expect(!entry.isFileMissing)
+        try await waitUntil("file status") { env.history.fileStatus[entry.id] != nil }
+        #expect(env.history.existingFiles(of: entry).count == 3)
+        #expect(!env.history.isFileMissing(entry))
 
         // One file gone isn't the entry's files gone.
         try FileManager.default.removeItem(at: files[0])
-        #expect(entry.existingOutputURLs.count == 2)
-        #expect(!entry.isFileMissing)
+        env.history.refreshFileStatus()
+        try await waitUntil("refreshed file status") { env.history.existingFiles(of: entry).count == 2 }
+        #expect(!env.history.isFileMissing(entry))
+        #expect(env.history.fileStatus[entry.id]?.missingCount == 1)
         #expect(MissingFiles.warning(missing: 1, of: 3) == "1 of 3 files have been moved or deleted.")
     }
 
     @Test("History finds every file of an entry after the app's container moved")
-    func outputURLsAreReRooted() throws {
+    func outputURLsAreReRooted() async throws {
+        let env = try AppTestEnvironment()
         let documents = try #require(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first)
         let folder = "YTDLPGUITests-\(UUID().uuidString)"
         let directory = documents.appending(path: folder, directoryHint: .isDirectory)
@@ -234,8 +238,10 @@ struct DownloadQueueTests {
             directory.appending(path: "1.mp4").path(percentEncoded: false),
             directory.appending(path: "2.mp4").path(percentEncoded: false),
         ])
-        #expect(entry.existingOutputURLs.count == 2)
-        #expect(!entry.isFileMissing)
+        env.history.add(entry)
+        try await waitUntil("file status") { env.history.fileStatus[entry.id] != nil }
+        #expect(env.history.existingFiles(of: entry).count == 2)
+        #expect(!env.history.isFileMissing(entry))
     }
 
     @Test("A video whose audio was kept beside it is named by the video, not the audio")
