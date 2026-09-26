@@ -152,17 +152,55 @@ struct AppModelTests {
         let model = env.makeAppModel()
         var options = DownloadOptions()
         options.subtitleMode = .both
+        options.outputDirectory = URL(fileURLWithPath: "/var/mobile/Containers/Data/Application/OLD/Documents")
         options.cookieFilePath = "/old/cookies.txt"
-        options.customArguments = "--update --no-mtime"
+        options.useDownloadArchive = true
+        options.downloadArchivePath = "/old/archive.txt"
+        options.customArguments = "--exec 'rm -rf ~' --update --no-mtime"
         let entry = HistoryEntry(title: "Clip", sourceURL: url, formatSummary: "Best", kind: .video, succeeded: false, options: options)
 
         model.loadIntoComposer(entry)
         #expect(model.selectedTab == .download)
         #expect(model.composer.urlText == url)
         #expect(model.composer.options.subtitleMode == .both)
+        #expect(model.composer.options.useDownloadArchive)
+        #expect(model.composer.options.outputDirectory == env.storage.downloadsDirectory)
         #expect(model.composer.options.cookieFilePath.isEmpty)
+        #expect(model.composer.options.downloadArchivePath.isEmpty)
         #expect(model.composer.options.customArguments == "--no-mtime")
+        #expect(model.composer.statusMessage?.contains("‘--exec’") == true)
+        #expect(model.composer.statusMessage?.contains("‘--update’") == true)
         #expect(model.queue.items.isEmpty)
+        // "Edit Options and Download" never becomes the remembered options by itself.
+        #expect(env.settings.storedOptions.customArguments.isEmpty)
+    }
+
+    @Test("An older history entry without saved options loads with its own kind")
+    func loadIntoComposerWithoutOptions() async throws {
+        let env = try AppTestEnvironment()
+        env.settings.autoAnalyzePastedURLs = false
+        let model = env.makeAppModel()
+        model.composer.options.kind = .video
+        let entry = HistoryEntry(title: "Song", sourceURL: url, formatSummary: "Best Audio", kind: .audio, succeeded: true)
+
+        model.loadIntoComposer(entry)
+        #expect(model.composer.options.kind == .audio)
+        #expect(model.composer.urlText == url)
+        #expect(model.composer.statusMessage == nil)
+    }
+
+    @Test("A loaded history entry is analysed when automatic analysis is on")
+    func loadIntoComposerAnalyses() async throws {
+        let env = try AppTestEnvironment()
+        env.settings.autoAnalyzePastedURLs = true
+        env.analyzer.respond(with: .success(SampleInfo.video(url: url)))
+        let model = env.makeAppModel()
+        await model.performLaunchSetup()
+        let entry = HistoryEntry(title: "Clip", sourceURL: url, formatSummary: "Best", kind: .video, succeeded: true, options: DownloadOptions())
+
+        model.loadIntoComposer(entry)
+        try await waitUntil("analysis") { model.composer.analysis.info != nil }
+        #expect(env.analyzer.calls.count == 1)
     }
 
     @Test("Starting a download switches to the Queue tab only when something was queued")

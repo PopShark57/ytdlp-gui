@@ -39,7 +39,7 @@ struct HistoryEntryActionItems: View {
         }
 
         Button {
-            editAndDownload()
+            model.loadIntoComposer(entry)
         } label: {
             Label("Edit Options and Download", systemImage: "slider.horizontal.3")
         }
@@ -54,17 +54,6 @@ struct HistoryEntryActionItems: View {
         Button(role: .destructive, action: onDelete) {
             Label("Remove from History", systemImage: "trash")
         }
-    }
-
-    /// Puts the link and its original options into the Download tab, to change before
-    /// downloading. The composer re-checks custom arguments and paths, so nothing unsafe or stale
-    /// from an old entry gets through without being shown.
-    private func editAndDownload() {
-        if let options = entry.options {
-            model.composer.options = options
-        }
-        model.composer.setURLText(entry.sourceURL, analyzeIfEnabled: true)
-        model.selectedTab = .download
     }
 }
 

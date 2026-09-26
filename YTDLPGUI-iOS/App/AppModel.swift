@@ -334,7 +334,11 @@ final class AppModel {
     }
 
     /// Puts a history entry's link and options into the Download screen, to adjust before
-    /// downloading again.
+    /// downloading again ("Edit Options and Download").
+    ///
+    /// Paths from the earlier download and custom arguments the engine refuses are dropped, and
+    /// the person is told which arguments went. The link is analysed (when that setting is on),
+    /// so the formats are there to look at while editing.
     func loadIntoComposer(_ entry: HistoryEntry) {
         if let options = entry.options {
             composer.loadOptions(options)
@@ -346,7 +350,7 @@ final class AppModel {
             composer.options.kind = entry.kind
         }
         hasClipboardSuggestion = false
-        composer.setURLText(entry.sourceURL, analyzeIfEnabled: false)
+        composer.setURLText(entry.sourceURL, analyzeIfEnabled: true)
         selectedTab = .download
     }
 
