@@ -122,6 +122,9 @@ final class FakeEngineRuntime: EngineRuntime {
         var startError: EngineError?
         var startCount = 0
         var restartRequired = false
+        var latestVersion = "2026.9.1"
+        var installDelay: Duration = .zero
+        var installCount = 0
     }
 
     private let state = Mutex(State())
@@ -131,6 +134,18 @@ final class FakeEngineRuntime: EngineRuntime {
     }
 
     var startCount: Int { state.withLock { $0.startCount } }
+
+    /// The newest release the update check reports; the running one is `info.ytdlpVersion`.
+    func offerUpdate(_ version: String) {
+        state.withLock { $0.latestVersion = version }
+    }
+
+    /// How long an install takes, to catch the controller while it is installing.
+    func delayInstalls(by delay: Duration) {
+        state.withLock { $0.installDelay = delay }
+    }
+
+    var installCount: Int { state.withLock { $0.installCount } }
 
     func start() async throws -> EngineInfo {
         let error = state.withLock { state -> EngineError? in
@@ -144,12 +159,19 @@ final class FakeEngineRuntime: EngineRuntime {
     var isRestartRequired: Bool { state.withLock { $0.restartRequired } }
 
     func checkForUpdate() async throws -> EngineUpdateInfo {
-        EngineUpdateInfo(currentVersion: "2026.8.19", latestVersion: "2026.9.1", isNewer: true)
+        let latest = state.withLock { $0.latestVersion }
+        let current = Self.info.ytdlpVersion
+        return EngineUpdateInfo(currentVersion: current, latestVersion: latest, isNewer: latest > current)
     }
 
     func installLatestUpdate() async throws -> String {
+        let (delay, latest) = state.withLock { state in
+            state.installCount += 1
+            return (state.installDelay, state.latestVersion)
+        }
+        if delay > .zero { try await Task.sleep(for: delay) }
         state.withLock { $0.restartRequired = true }
-        return "2026.9.1"
+        return latest
     }
 
     func revertToBundledVersion() throws {
