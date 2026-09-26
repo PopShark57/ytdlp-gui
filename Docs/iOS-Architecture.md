@@ -171,6 +171,14 @@ that into a warning and keeps the original file rather than failing the download
 | `media.remove_ranges` | `input`, `output`, `ranges` [[start, end]] | — |
 | `media.probe` | `path` | `duration`, `tracks` [{kind, codec}], `readable` |
 
+`js.run` evaluates each script in a fresh JavaScriptCore virtual machine on a thread of its own.
+JavaScriptCore can't interrupt a script, so a run that times out is abandoned: the caller gets
+the error at once while the script finishes by itself. Abandoned runs still count towards a
+limit on runs going at once (`JavaScriptEvaluationSlots`: 2 plus one per two cores). A run that
+finds every slot taken waits for one within its own time limit, and otherwise answers with a
+"busy" error, which yt-dlp reports as an unsolved challenge. Abandoned runs are logged when they
+are given up and when they end.
+
 ## yt-dlp integration
 
 All of it goes through yt-dlp's own extension points, not by editing its source:

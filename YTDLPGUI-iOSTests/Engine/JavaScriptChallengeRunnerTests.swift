@@ -5,7 +5,9 @@ import Testing
 @Suite("JavaScript challenge runner", .timeLimit(.minutes(1)))
 struct JavaScriptChallengeRunnerTests {
 
-    private let runner = JavaScriptChallengeRunner()
+    /// Slots of its own for each test, so scripts other tests abandon (tests run in parallel)
+    /// never hold this one up.
+    private let runner = JavaScriptChallengeRunner(slots: JavaScriptEvaluationSlots(capacity: 16))
 
     // MARK: - Console
 
@@ -101,6 +103,55 @@ struct JavaScriptChallengeRunnerTests {
             try await task.value
         }
         #expect(ContinuousClock.now - started < .seconds(1))
+    }
+
+    @Test("Abandoned scripts hold their slot until they end; a run beyond the limit waits, then gives up as busy")
+    func evaluationLimit() async throws {
+        let slots = JavaScriptEvaluationSlots(capacity: 2)
+        let runner = JavaScriptChallengeRunner(slots: slots)
+        let slowScript = "const end = Date.now() + 1500; while (Date.now() < end) {}"
+
+        // Two runs time out at once, leaving their scripts running for a while.
+        for _ in 0..<2 {
+            await #expect(throws: JavaScriptRunnerError.timedOut(seconds: 1)) {
+                try await runner.run(slowScript, timeout: .milliseconds(100))
+            }
+        }
+        #expect(slots.running == 2)
+
+        // A third finds no free slot before its own time limit.
+        let started = ContinuousClock.now
+        await #expect(throws: JavaScriptRunnerError.busy) {
+            try await runner.run("console.log(1)", timeout: .milliseconds(200))
+        }
+        #expect(ContinuousClock.now - started < .seconds(1))
+
+        // With a longer limit it waits for an abandoned script to end, then runs.
+        let output = try await runner.run("console.log(2)", timeout: .seconds(10))
+        #expect(output.stdout == "2")
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while slots.running > 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(slots.running == 0)
+    }
+
+    @Test("A run cancelled while waiting for a slot stops waiting")
+    func cancelledWhileWaiting() async throws {
+        let slots = JavaScriptEvaluationSlots(capacity: 1)
+        let runner = JavaScriptChallengeRunner(slots: slots)
+        await #expect(throws: JavaScriptRunnerError.timedOut(seconds: 1)) {
+            try await runner.run("const end = Date.now() + 1500; while (Date.now() < end) {}", timeout: .milliseconds(100))
+        }
+        let waiting = Task { try await runner.run("console.log(1)", timeout: .seconds(10)) }
+        try await Task.sleep(for: .milliseconds(100))
+        let started = ContinuousClock.now
+        waiting.cancel()
+        await #expect(throws: JavaScriptRunnerError.cancelled) {
+            try await waiting.value
+        }
+        #expect(ContinuousClock.now - started < .milliseconds(500))
     }
 
     // MARK: - The real solver
