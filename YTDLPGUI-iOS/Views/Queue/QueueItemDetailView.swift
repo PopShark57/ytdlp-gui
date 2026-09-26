@@ -319,7 +319,7 @@ private struct QueueItemInfoList: View {
             }
             if item.canRetry {
                 Button {
-                    model.queue.retry(item)
+                    model.retry(item)
                 } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
                 }

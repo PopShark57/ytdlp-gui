@@ -11,6 +11,28 @@ enum PhotoSaveState: Equatable, Sendable {
     case failed(String)
 }
 
+/// What happened when a link was offered to the queue.
+@MainActor
+enum EnqueueOutcome {
+    /// A new item was added for the link.
+    case added(DownloadItem)
+    /// The link was already waiting or running as this item, so nothing was added.
+    case alreadyPending(DownloadItem)
+
+    /// The item now responsible for the link: the new one, or the one that was already there.
+    var item: DownloadItem {
+        switch self {
+        case .added(let item), .alreadyPending(let item): item
+        }
+    }
+
+    /// The new item, or `nil` when the link was already pending.
+    var addedItem: DownloadItem? {
+        if case .added(let item) = self { return item }
+        return nil
+    }
+}
+
 /// Owns the download queue and runs downloads through the embedded engine.
 ///
 /// The iOS counterpart of the macOS queue, with the same API and behaviour: at most
@@ -114,9 +136,25 @@ final class DownloadQueue {
 
     // MARK: - Adding
 
-    /// Adds one link to the queue. Paths in `options` are replaced with this install's own.
+    /// The waiting or running item for this link, if there is one.
+    ///
+    /// A link is only ever queued once at a time. yt-dlp names its temporary files after the
+    /// video and doesn't lock them, so two jobs for one link would write the same `.part` files.
+    /// Different quality choices still share the audio stream's file, so the rule is by link,
+    /// not by options.
+    func pendingItem(forURL url: String) -> DownloadItem? {
+        let key = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        return items.first { !$0.state.isFinished && $0.sourceURL == key }
+    }
+
+    /// Adds one link to the queue, unless it is already waiting or running. Paths in `options`
+    /// are replaced with this install's own.
     @discardableResult
-    func enqueue(url: String, options: DownloadOptions, info: MediaInfo? = nil) -> DownloadItem {
+    func enqueue(url: String, options: DownloadOptions, info: MediaInfo? = nil) -> EnqueueOutcome {
+        let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let pending = pendingItem(forURL: url) {
+            return .alreadyPending(pending)
+        }
         let options = resolver.resolve(options)
         let item = DownloadItem(
             sourceURL: url,
@@ -131,18 +169,17 @@ final class DownloadQueue {
         items.append(item)
         settings.rememberOptions(options)
         queueDidChange()
-        return item
+        return .added(item)
     }
 
-    /// Queues several links, skipping blanks and ones already waiting.
+    /// Queues several links, skipping blanks, repeats and ones already waiting or running.
+    /// Returns the items that were added.
     @discardableResult
     func enqueue(urls: [String], options: DownloadOptions) -> [DownloadItem] {
-        let pending = Set(items.filter { !$0.state.isFinished }.map(\.sourceURL))
-        var seen = Set<String>()
-        return urls
+        urls
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && !pending.contains($0) && seen.insert($0).inserted }
-            .map { enqueue(url: $0, options: options) }
+            .filter { !$0.isEmpty }
+            .compactMap { enqueue(url: $0, options: options).addedItem }
     }
 
     // MARK: - Queue control
@@ -169,15 +206,33 @@ final class DownloadQueue {
         for item in items where item.canCancel { cancel(item) }
     }
 
-    func retry(_ item: DownloadItem) {
-        guard item.canRetry else { return }
+    /// Runs a failed or cancelled item again, unless another item for the same link is waiting
+    /// or running. Returns that other item when it is why nothing happened.
+    @discardableResult
+    func retry(_ item: DownloadItem) -> DownloadItem? {
+        guard item.canRetry else { return nil }
+        if let pending = pendingItem(forURL: item.sourceURL), pending.id != item.id {
+            return pending
+        }
         prepareForRetry(item)
         queueDidChange()
+        return nil
     }
 
-    func retryAllFailed() {
-        for item in items where item.state == .failed { prepareForRetry(item) }
+    /// Retries every failed item whose link isn't already waiting or running, including by an
+    /// item retried just before it. Returns how many were skipped for that reason.
+    @discardableResult
+    func retryAllFailed() -> Int {
+        var skipped = 0
+        for item in items where item.state == .failed {
+            if let pending = pendingItem(forURL: item.sourceURL), pending.id != item.id {
+                skipped += 1
+            } else {
+                prepareForRetry(item)
+            }
+        }
         queueDidChange()
+        return skipped
     }
 
     func remove(_ item: DownloadItem) {
@@ -264,11 +319,17 @@ final class DownloadQueue {
     }
 
     /// Starts queued items until the concurrency limit is reached.
+    ///
+    /// An item whose link is already running waits for that one to finish. Adding and retrying
+    /// already refuse a second item for a pending link; this also covers the paths that bypass
+    /// them, such as downloads resuming after a background interruption.
     private func startEligibleItems() {
         guard !isSuspended else { return }
         let limit = settings.maximumConcurrentDownloads.constrained(to: AppSettings.concurrencyRange)
         for item in items where item.state == .queued {
             guard activeCount < limit else { break }
+            let linkIsRunning = items.contains { $0.state == .active && $0.sourceURL == item.sourceURL }
+            guard !linkIsRunning else { continue }
             start(item)
         }
     }

@@ -234,6 +234,27 @@ struct DownloadComposerTests {
         #expect(composer.statusMessage == "Added 1 download to the queue.")
     }
 
+    @Test("An analysed link that is already queued isn't queued again, and stays in the field")
+    func duplicateAnalysedLink() async throws {
+        let env = try await readyEnvironment()
+        let composer = env.composer
+        env.analyzer.respond(with: .success(SampleInfo.video(url: url)))
+        composer.setURLText(url, analyzeIfEnabled: true)
+        try await waitUntil("analysis") { composer.analysis.info != nil }
+        #expect(composer.startDownload())
+        #expect(composer.statusMessage == "Added “Sample Clip” to the queue.")
+        _ = try await waitForJobs(1, on: env.downloader)
+
+        composer.setURLText(url, analyzeIfEnabled: true)
+        try await waitUntil("second analysis") { composer.analysis.info != nil }
+        #expect(!composer.startDownload())
+        #expect(composer.statusMessage == "That link is already in the queue.")
+        #expect(composer.urlText == url)
+        #expect(env.queue.items.count == 1)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(env.downloader.jobs.count == 1)
+    }
+
     @Test("Custom arguments the engine refuses block downloading")
     func blockedCustomArguments() async throws {
         let env = try await readyEnvironment()

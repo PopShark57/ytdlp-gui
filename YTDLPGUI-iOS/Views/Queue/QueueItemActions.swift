@@ -42,7 +42,7 @@ struct QueueItemMenuItems: View {
 
         if item.canRetry {
             Button {
-                model.queue.retry(item)
+                model.retry(item)
             } label: {
                 Label("Retry", systemImage: "arrow.clockwise")
             }
@@ -122,7 +122,7 @@ struct QueueItemSwipeActions: ViewModifier {
             .swipeActions(edge: .leading) {
                 if item.canRetry {
                     Button {
-                        model.queue.retry(item)
+                        model.retry(item)
                     } label: {
                         Label("Retry", systemImage: "arrow.clockwise")
                     }

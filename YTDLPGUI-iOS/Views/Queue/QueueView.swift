@@ -115,7 +115,7 @@ struct QueueView: View {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button {
-                    queue.retryAllFailed()
+                    model.retryAllFailed()
                 } label: {
                     Label("Retry Failed", systemImage: "arrow.clockwise")
                 }

@@ -248,7 +248,11 @@ the macOS one.
 - **`DownloadComposer`** — the Download screen: URL text, analysis, options, advisories, command
   preview, queueing.
 - **`DownloadQueue`** — runs `DownloadItem`s through `YTDLPEngine`, with a concurrency limit, and
-  handles completion: history, notifications, saving to Photos.
+  handles completion: history, notifications, saving to Photos. A link is queued only once at a
+  time: `enqueue` returns `.alreadyPending` for a link that is waiting or running, whichever
+  screen it came from, and retrying skips an item whose link is pending as another item. yt-dlp
+  names its temporary files after the video and doesn't lock them, so two jobs for one link would
+  write the same `.part` files.
 - **Services** — `AppSettings`, `NotificationService`, `MediaLibrary` (Photos), `CookieStore`,
   `StorageManager`, `BackgroundActivity` (continued processing and idle timer), `SharedLinkInbox`.
 

@@ -343,9 +343,18 @@ final class DownloadComposer {
         let urls = detectedURLs
         let queuedOptions = resolver.resolve(options)
 
-        if urls.count == 1, let info = analysis.info, info.originalURL == urls[0] {
-            queue.enqueue(url: urls[0], options: queuedOptions, info: info)
-            showStatus("Added “\(info.title)” to the queue.")
+        if urls.count == 1, let url = urls.first {
+            let info = analysis.info.flatMap { $0.originalURL == url ? $0 : nil }
+            guard case .added = queue.enqueue(url: url, options: queuedOptions, info: info) else {
+                // The link stays in the field, so nothing typed is lost.
+                showStatus("That link is already in the queue.")
+                return false
+            }
+            if let info {
+                showStatus("Added “\(info.title)” to the queue.")
+            } else {
+                showStatus("Added 1 download to the queue.")
+            }
         } else {
             let added = queue.enqueue(urls: urls, options: queuedOptions)
             switch added.count {

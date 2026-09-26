@@ -314,13 +314,23 @@ final class AppModel {
 
     /// Queues a history entry again with the options it was first downloaded with, after
     /// stripping any custom arguments the engine refuses, so history can't replay them.
+    ///
+    /// When the link is already waiting or running, that download is shown instead.
     func downloadAgain(_ entry: HistoryEntry) {
         var options = entry.options ?? composer.options
         if entry.options == nil { options.kind = entry.kind }
         let sanitized = DownloadOptionsResolver.sanitizedCustomArguments(options.customArguments)
         options.customArguments = sanitized.arguments
 
-        let item = queue.enqueue(url: entry.sourceURL, options: resolver.resolve(options))
+        let item: DownloadItem
+        switch queue.enqueue(url: entry.sourceURL, options: resolver.resolve(options)) {
+        case .added(let added):
+            item = added
+        case .alreadyPending(let pending):
+            showQueueItem(pending.id)
+            composer.showStatus("That link is already in the queue.")
+            return
+        }
         if item.title == nil, entry.title != entry.sourceURL { item.title = entry.title }
         if item.thumbnailURL == nil { item.thumbnailURL = entry.thumbnailURL }
         if item.durationSeconds == nil { item.durationSeconds = entry.durationSeconds }
@@ -352,6 +362,23 @@ final class AppModel {
         hasClipboardSuggestion = false
         composer.setURLText(entry.sourceURL, analyzeIfEnabled: true)
         selectedTab = .download
+    }
+
+    /// Runs a failed or cancelled download again, unless its link is already waiting or running
+    /// as another item, which is then pointed out instead.
+    func retry(_ item: DownloadItem) {
+        guard queue.retry(item) != nil else { return }
+        composer.showStatus("That link is already in the queue.")
+    }
+
+    /// Retries every failed download, and says how many were left alone because their link is
+    /// already waiting or running.
+    func retryAllFailed() {
+        let skipped = queue.retryAllFailed()
+        guard skipped > 0 else { return }
+        composer.showStatus(skipped == 1
+            ? "One download wasn't retried because its link is already in the queue."
+            : "\(skipped) downloads weren't retried because their links are already in the queue.")
     }
 
     /// Shows a queue item's details.

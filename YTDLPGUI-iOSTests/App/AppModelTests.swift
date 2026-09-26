@@ -145,6 +145,44 @@ struct AppModelTests {
         #expect(model.composer.statusMessage?.contains("‘--cookies-from-browser’") == true)
     }
 
+    @Test("Download Again shows the existing item when the link is already queued")
+    func downloadAgainWhilePending() async throws {
+        let env = try AppTestEnvironment()
+        let model = env.makeAppModel()
+        let existing = model.queue.enqueue(url: url, options: DownloadOptions()).item
+        _ = try await waitForJobs(1, on: env.downloader)
+        model.selectedTab = .history
+        let entry = HistoryEntry(title: "Clip", sourceURL: url, formatSummary: "Best", kind: .video, succeeded: true, options: DownloadOptions())
+
+        model.downloadAgain(entry)
+        #expect(model.queue.items.count == 1)
+        #expect(model.selectedTab == .queue)
+        #expect(model.focusedQueueItemID == existing.id)
+        #expect(model.composer.statusMessage == "That link is already in the queue.")
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(env.downloader.jobs.count == 1)
+    }
+
+    @Test("Retrying reports a link that is already queued again")
+    func retryReportsPendingLink() async throws {
+        let env = try AppTestEnvironment()
+        let model = env.makeAppModel()
+        let failed = model.queue.enqueue(url: url, options: DownloadOptions()).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+        job.fail()
+        try await waitUntil("failure") { failed.state == .failed }
+        _ = model.queue.enqueue(url: url, options: DownloadOptions())
+
+        model.retry(failed)
+        #expect(failed.state == .failed)
+        #expect(model.composer.statusMessage == "That link is already in the queue.")
+
+        model.composer.dismissStatus()
+        model.retryAllFailed()
+        #expect(failed.state == .failed)
+        #expect(model.composer.statusMessage == "One download wasn't retried because its link is already in the queue.")
+    }
+
     @Test("Loading a history entry into the Download screen keeps its options but not its paths")
     func loadIntoComposer() async throws {
         let env = try AppTestEnvironment()
