@@ -4,6 +4,55 @@ Handoff for the next session. Written 2026-09-24, updated 2026-09-25. The iOS ap
 PR #3 (`feat/ios-app`). The follow-up work in "Done on 2026-09-25" below is on the branch
 `claude/magical-dirac-95o34m`.
 
+## Done on 2026-09-26: the `improvements.md` audit, implemented (cloud session, Linux)
+
+Branch `claude/vigilant-ritchie-nmba4d`, one commit per step, in the audit's order:
+
+| Step | Commit subject |
+|---|---|
+| P1-3 | Edit Options and Download goes through `AppModel.loadIntoComposer` (and analyses) |
+| P1-2 | A link is queued once at a time: `EnqueueOutcome`, retry rules, scheduler backstop |
+| P1-6 | Credentials masked in the preview and logs; left out of history and last-used options |
+| P1-1 | yt-dlp updates in `Engine/yt-dlp/versions/<UUID>/` with a `current` pointer; legacy migration and clean-up before Python starts |
+| schema | `HistoryEntry.downloadID`, `.outputPaths` (and `.removedSecretOptions` from P1-6) |
+| P1-5, P2-3 | Every output file recorded; host `file` event has `main`; Photos eligibility decided once, off the main actor |
+| P1-4 | Notification taps: queue item, else History entry by `downloadID` |
+| P2-2 | `HistoryStore.fileStatus` cache, filled off the main actor |
+| P2-1 | `JavaScriptEvaluationSlots` caps solver runs, abandoned ones included |
+| P3-1…7 | One logging subsystem (`AppLog`); host errors in the log; stored `detectedURLs`; stable log rows; `StatusCenter`; single window on iPad; options remembered only from the composer |
+| cleanups | Dead code removed; one options resolver; `ShareInbox/` format shared by app and extension; `HistoryStore.flush` fix; tests for `BackgroundActivity` and `EngineController` |
+
+**Decisions recorded (asked of the user):**
+
+- **P1-6(b):** history entries and the last-used options are saved *without* credentials.
+  *Download Again* / *Edit Options* then say which options lost them. `queue.json` keeps them so
+  interrupted downloads resume, and is excluded from backups.
+- **P3-6:** iPad multi-window is **off** (`UIApplicationSupportsMultipleScenes = NO` in `Info.plist`,
+  scene-manifest generation off), rather than per-scene navigation state.
+
+**Verified here:** Python host suite **136 pass, 1 skipped** (live), on Python 3.14.0rc2 with
+ffmpeg and the pinned wheels. The new host test that an existing folder is never replaced fails
+on the old code. Every changed Swift file parses with the tree-sitter Swift grammar (syntax
+only). The project file parses (`openstep_parser`), with `ShareInbox` in both the app and
+extension targets.
+
+**Not verified: nothing Swift was compiled or run.** `download.swift.org` is blocked by this
+environment's network policy, and there is no Xcode. Next, on the Mac:
+
+1. `xcodebuild test -scheme YTDLPGUI -destination 'platform=macOS'` (Shared changed:
+   `ShellQuoting`, `HistoryEntry`, `HistoryStore`, `DownloadItem`, `DownloadOptions`, new `AppLog`).
+2. The iOS unit tests on the iPhone (command below). New suites: `EngineConfigurationTests`,
+   `HistoryStoreTests`, `BackgroundActivityTests`, `EngineControllerTests`, plus new cases in the
+   queue, composer, app-model, settings, JavaScript-runner, event-decoder and inbox suites.
+3. Build the Share extension: it now also compiles `ShareInbox/ShareInboxFormat.swift`.
+4. On the device, by hand:
+   - an app that had an update installed by an earlier build launches, still says "Updated",
+     and `Engine/yt-dlp/` now holds `versions/legacy-…/` and `current`;
+   - install an update, then *Use Bundled Version*, while a download runs;
+   - a completion notification tapped after the app was ended opens the History entry;
+   - a playlist's History entry lists, shares and previews all its files;
+   - iPad offers no second window.
+
 ## What exists
 
 The native iPhone/iPad version of the macOS app is built and tested on a real device.
