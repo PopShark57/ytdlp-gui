@@ -69,7 +69,7 @@ final class FakeAnalysisEngine: AnalysisEngine {
     }
 
     private struct State {
-        var outcome: Outcome = .failure(.notStarted)
+        var outcome: Outcome = .failure(.hostFailure(message: "The test didn't say how analysis should answer.", traceback: nil))
         var log: [String] = []
         var calls: [[String]] = []
         var cancelledJobIDs: [UUID] = []

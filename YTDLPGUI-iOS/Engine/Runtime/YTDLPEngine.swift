@@ -72,14 +72,6 @@ final class YTDLPEngine: Sendable {
         }
     }
 
-    /// Whether `start()` has completed successfully.
-    var isStarted: Bool {
-        startPhase.withLock { phase in
-            if case .started = phase { return true }
-            return false
-        }
-    }
-
     private func performStart() async throws -> EngineInfo {
         let startedAt = ContinuousClock.now
         let result = await EngineThread.run(named: "YTDLP GUI engine start") { [configuration, router] in

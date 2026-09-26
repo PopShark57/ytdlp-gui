@@ -77,16 +77,6 @@ final class MediaLibrary {
         }
     }
 
-    /// Asks for add-only access if it hasn't been decided yet. Returns whether saving is allowed.
-    @discardableResult
-    func requestAuthorizationIfNeeded() async -> Bool {
-        switch await PHPhotoLibrary.requestAuthorization(for: .addOnly) {
-        case .authorized, .limited: true
-        case .denied, .restricted, .notDetermined: false
-        @unknown default: false
-        }
-    }
-
     /// Asks for add-only access if needed, then saves.
     func saveToPhotos(_ url: URL) async throws {
         let name = url.lastPathComponent

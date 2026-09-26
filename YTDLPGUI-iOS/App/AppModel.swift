@@ -436,9 +436,6 @@ final class AppModel {
         }
     }
 
-    /// Whether leaving now would interrupt running downloads.
-    var hasWorkInProgress: Bool { queue.activeCount > 0 }
-
     private static func describe(_ flags: [String]) -> String {
         let listed = flags.map { "‘\($0)’" }.joined(separator: ", ")
         return "the unsupported option\(flags.count == 1 ? "" : "s") \(listed)"

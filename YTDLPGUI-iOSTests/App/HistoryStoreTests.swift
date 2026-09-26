@@ -3,10 +3,10 @@ import Testing
 @testable import YTDLPGUI_iOS
 
 /// History keeps what it found on disk for each entry, worked out off the main actor, so the
-/// History tab never touches the file system while it draws.
+/// History tab never touches the file system while it draws; and it writes only what changed.
 @MainActor
-@Suite("History file status")
-struct HistoryFileStatusTests {
+@Suite("History store")
+struct HistoryStoreTests {
 
     private func makeEntry(for files: [URL], succeeded: Bool = true) -> HistoryEntry {
         HistoryEntry(
@@ -71,6 +71,22 @@ struct HistoryFileStatusTests {
         #expect(relaunched.entries.map(\.id) == [missing.id])
         try await waitUntil("file status after loading") { relaunched.hasMissingFiles }
         #expect(relaunched.isFileMissing(missing))
+    }
+
+    @Test("Flushing writes only when a save is pending")
+    func flushWritesOnlyPendingChanges() async throws {
+        let env = try AppTestEnvironment()
+        let historyFile = env.history.storageDirectory.appending(path: "history.json")
+        env.history.add(makeEntry(for: []))
+        env.history.flush()
+        #expect(FileManager.default.fileExists(atPath: historyFile.path(percentEncoded: false)))
+
+        // A scheduled save that has already happened leaves nothing to flush.
+        env.history.add(makeEntry(for: []))
+        try await Task.sleep(for: .milliseconds(800))
+        try FileManager.default.removeItem(at: historyFile)
+        env.history.flush()
+        #expect(!FileManager.default.fileExists(atPath: historyFile.path(percentEncoded: false)))
     }
 
     @Test("Coming back to the app checks history's files again")

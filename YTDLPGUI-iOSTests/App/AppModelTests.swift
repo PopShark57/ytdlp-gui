@@ -292,7 +292,7 @@ struct AppModelTests {
         model.startDownload()
         #expect(model.selectedTab == .queue)
         #expect(model.queue.items.count == 1)
-        #expect(model.hasWorkInProgress || model.queue.queuedCount == 1)
+        #expect(model.queue.isBusy)
     }
 
     @Test("Launch setup restores the saved queue and starts the engine once")

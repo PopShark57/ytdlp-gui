@@ -193,8 +193,10 @@ final class HistoryStore {
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            self?.saveNow()
+            guard !Task.isCancelled, let self else { return }
+            self.saveNow()
+            // Nothing is pending any more, so `flush()` has nothing to write.
+            self.saveTask = nil
         }
     }
 

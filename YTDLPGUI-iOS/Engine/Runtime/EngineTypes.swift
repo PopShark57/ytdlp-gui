@@ -121,8 +121,6 @@ enum EngineJobUpdate: Equatable, Sendable {
 enum EngineError: LocalizedError, Equatable, Sendable {
     /// The interpreter or the host module could not be started.
     case startupFailed(String)
-    /// A call was made before `start()` succeeded.
-    case notStarted
     /// The host reported a failure for a command.
     case hostFailure(message: String, traceback: String?)
     /// Analysis finished with yt-dlp reporting an error; `logLines` holds its output.
@@ -132,7 +130,6 @@ enum EngineError: LocalizedError, Equatable, Sendable {
     var errorDescription: String? {
         switch self {
         case .startupFailed(let message): "The download engine couldn't start: \(message)"
-        case .notStarted: "The download engine hasn't started yet."
         case .hostFailure(let message, _): message
         case .analysisFailed(let message, _): message
         case .cancelled: "Cancelled."
