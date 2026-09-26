@@ -269,6 +269,9 @@ the macOS one.
   and the clipboard suggestion. A tap on a download notification goes through `openDownload`:
   the queue item while the queue has it, otherwise the history entry whose `downloadID` matches,
   since the queue forgets finished downloads when the app is relaunched or they're cleared.
+  The app runs in a single window on iPad too (`UIApplicationSupportsMultipleScenes` is `NO` in
+  `Info.plist`, with the generated scene manifest turned off): there is one `AppModel`, and a
+  second window would share its tab and navigation state.
 - **`EngineController`** — the counterpart of `Toolchain`: engine state (starting, ready, failed),
   versions, the capabilities used for argument building, and yt-dlp updates.
 - **`DownloadComposer`** — the Download screen: URL text, analysis, options, advisories, command
