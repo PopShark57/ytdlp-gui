@@ -46,14 +46,14 @@ extension HistoryEntry {
         return parts.joined(separator: " · ")
     }
 
-    /// A successful download whose file is no longer where it was saved.
+    /// A successful download none of whose files is still where it was saved.
     var isFileMissing: Bool {
         succeeded && !fileExists
     }
 
-    /// The file, when it's still there to open or share.
-    var existingOutputURL: URL? {
-        fileExists ? outputURL : nil
+    /// The files still there to open or share, in the order they were downloaded.
+    var existingOutputURLs: [URL] {
+        outputURLs.filter { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
     }
 
     var accessibilityStatus: String {

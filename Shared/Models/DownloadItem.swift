@@ -68,7 +68,12 @@ final class DownloadItem: Identifiable {
     var phase: DownloadPhase = .waiting
     var progress: DownloadProgressSnapshot = .empty
     var failure: DownloadFailure?
+    /// The main file: the video, or the last video of a playlist.
     var outputURL: URL?
+    /// Every file the download produced, in the order they were finished: one per video of a
+    /// playlist, or a video and the audio track kept beside it when the two couldn't be merged.
+    /// Empty when only `outputURL` is known.
+    var outputURLs: [URL] = []
     var completedFileSize: Int64?
     var finishedAt: Date?
 
@@ -128,6 +133,7 @@ final class DownloadItem: Identifiable {
         progress = .empty
         failure = nil
         outputURL = nil
+        outputURLs = []
         completedFileSize = nil
         finishedAt = nil
         completedItemCount = 0
@@ -140,6 +146,7 @@ final class DownloadItem: Identifiable {
             title: displayTitle,
             sourceURL: sourceURL,
             outputPath: outputURL?.path(percentEncoded: false),
+            outputPaths: outputURLs.isEmpty ? nil : outputURLs.map { $0.path(percentEncoded: false) },
             date: finishedAt ?? Date(),
             formatSummary: options.formatSummary,
             kind: options.kind,

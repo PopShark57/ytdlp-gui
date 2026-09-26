@@ -7,7 +7,7 @@ struct HistoryView: View {
 
     @State private var searchText = ""
     @State private var filter: Filter = .all
-    @State private var quickLookURL: URL?
+    @State private var previewFiles: [URL] = []
     @State private var photoError: String?
     @State private var confirmsClearing = false
 
@@ -48,7 +48,7 @@ struct HistoryView: View {
                 }
             }
         }
-        .quickLookPreview($quickLookURL)
+        .quickLookFiles($previewFiles)
         .modifier(PhotoSaveErrorAlert(errorMessage: $photoError))
     }
 
@@ -70,7 +70,7 @@ struct HistoryView: View {
                 .contextMenu {
                     HistoryEntryActionItems(
                         entry: entry,
-                        onOpen: { quickLookURL = $0 },
+                        onOpen: { previewFiles = $0 },
                         onSaveToPhotos: saveToPhotos,
                         onDelete: { history.remove(entry) }
                     )
@@ -152,15 +152,8 @@ struct HistoryView: View {
 
     // MARK: - Actions
 
-    private func saveToPhotos(_ url: URL) {
-        Task {
-            do {
-                try await model.library.saveToPhotos(url)
-                model.composer.showStatus("Saved to Photos.")
-            } catch {
-                photoError = error.localizedDescription
-            }
-        }
+    private func saveToPhotos(_ files: [URL]) {
+        saveHistoryFilesToPhotos(files, model: model, errorMessage: $photoError)
     }
 
     // MARK: - Filtering

@@ -49,6 +49,9 @@ final class DownloadQueue {
 
     private(set) var items: [DownloadItem] = []
     private var photoSaveStates: [DownloadItem.ID: PhotoSaveState] = [:]
+    /// The finished files of each completed item that Photos can take. Decided once, off the
+    /// main actor, when the item completes: checking a video reads the file.
+    private var photoEligibleFiles: [DownloadItem.ID: [URL]] = [:]
 
     var activeItems: [DownloadItem] { items.filter { $0.state == .active } }
     var queuedItems: [DownloadItem] { items.filter { $0.state == .queued } }
@@ -85,8 +88,6 @@ final class DownloadQueue {
     @ObservationIgnored private var runners: [DownloadItem.ID: Task<Void, Never>] = [:]
     @ObservationIgnored private var jobIDs: [DownloadItem.ID: UUID] = [:]
     @ObservationIgnored private var cancelRequested: Set<DownloadItem.ID> = []
-    /// Final files each finished item produced, for saving to Photos. A playlist makes several.
-    @ObservationIgnored private var producedFiles: [DownloadItem.ID: [URL]] = [:]
 
     /// Items the system stopped (background time ran out) rather than the person.
     @ObservationIgnored private var interruptedIDs: Set<DownloadItem.ID> = []
@@ -266,7 +267,7 @@ final class DownloadQueue {
         interruptedIDs.remove(item.id)
         resumableIDs.remove(item.id)
         photoSaveStates[item.id] = nil
-        producedFiles[item.id] = nil
+        photoEligibleFiles[item.id] = nil
         item.prepareForRetry()
     }
 
@@ -274,7 +275,7 @@ final class DownloadQueue {
         cancelRequested.remove(id)
         interruptedIDs.remove(id)
         resumableIDs.remove(id)
-        producedFiles[id] = nil
+        photoEligibleFiles[id] = nil
         photoSaveStates[id] = nil
     }
 
@@ -441,13 +442,14 @@ final class DownloadQueue {
             return
         }
 
-        let files = tracker.finalFiles(including: result.files)
-        producedFiles[item.id] = files
-
         if result.wasCancelled {
             finishCancelled(item)
         } else if result.isSuccess {
-            item.outputURL = files.last ?? tracker.fallbackURL
+            let files = tracker.finalFiles(including: result.files)
+            item.outputURLs = files
+            // Not simply the last file: a video whose audio had to be kept beside it reports the
+            // audio after the video.
+            item.outputURL = tracker.mainFile(among: files) ?? tracker.fallbackURL
             item.completedFileSize = Self.totalSize(of: files.isEmpty ? item.outputURL.map { [$0] } ?? [] : files)
             finish(item, failure: nil)
         } else if let hostError = result.hostError {
@@ -467,8 +469,11 @@ final class DownloadQueue {
         var downloadDestination: URL?
         /// Set by merging, audio extraction or metadata stages.
         var processedDestination: URL?
-        /// Final locations reported by `file` events, one per finished video. Authoritative.
+        /// Final locations reported by `file` events: each finished video, and anything kept
+        /// beside it. Authoritative.
         var reportedFiles: [URL] = []
+        /// The reported files that are videos (or songs), not companions kept beside one.
+        var reportedMainFiles: [URL] = []
 
         /// The best guess when the engine reported no final file at all.
         var fallbackURL: URL? { processedDestination ?? downloadDestination }
@@ -485,9 +490,16 @@ final class DownloadQueue {
             processedDestination = resolve(path)
         }
 
-        mutating func recordFinal(path: String) {
+        mutating func recordFinal(path: String, isMain: Bool) {
             let url = resolve(path)
             if !reportedFiles.contains(url) { reportedFiles.append(url) }
+            if isMain, !reportedMainFiles.contains(url) { reportedMainFiles.append(url) }
+        }
+
+        /// The file that stands for the download: the last video reported, which for a single
+        /// video is the video itself. Without `file` events, the first file the job listed.
+        func mainFile(among files: [URL]) -> URL? {
+            reportedMainFiles.last ?? files.first
         }
 
         func finalFiles(including resultPaths: [String]) -> [URL] {
@@ -538,11 +550,12 @@ final class DownloadQueue {
         case .item(let info):
             applyItemInfo(info, to: item)
 
-        case .file(let path):
-            tracker.recordFinal(path: path)
-            // Counted per finished file rather than per finished transfer: a merged video is
-            // two transfers (picture and sound) but one item of a playlist.
-            item.completedItemCount += 1
+        case .file(let path, let isMain):
+            tracker.recordFinal(path: path, isMain: isMain)
+            // Counted per finished video rather than per finished transfer or file: a merged
+            // video is two transfers (picture and sound) but one item of a playlist, and so is a
+            // video whose audio had to be kept beside it.
+            if isMain { item.completedItemCount += 1 }
         }
     }
 
@@ -636,8 +649,8 @@ final class DownloadQueue {
             }
         }
 
-        if failure == nil, settings.saveVideosToPhotos, item.options.kind == .video, canSaveToPhotos(item) {
-            saveToPhotos(item)
+        if failure == nil {
+            decidePhotoEligibility(of: item, thenSave: settings.saveVideosToPhotos && item.options.kind == .video)
         }
     }
 
@@ -699,6 +712,8 @@ final class DownloadQueue {
 
     // MARK: - Photos
 
+    /// Whether the completed item has files Photos can take. False until that has been worked
+    /// out, a moment after the download completes.
     func canSaveToPhotos(_ item: DownloadItem) -> Bool {
         item.state == .completed && !photoFiles(for: item).isEmpty
     }
@@ -734,8 +749,26 @@ final class DownloadQueue {
     }
 
     private func photoFiles(for item: DownloadItem) -> [URL] {
-        let files = producedFiles[item.id] ?? item.outputURL.map { [$0] } ?? []
-        return files.filter(library.canSaveToPhotos)
+        photoEligibleFiles[item.id] ?? []
+    }
+
+    /// Works out, off the main actor, which of a completed item's files Photos can take, and
+    /// then saves them if `thenSave`.
+    private func decidePhotoEligibility(of item: DownloadItem, thenSave: Bool) {
+        let files = item.outputURLs.isEmpty ? item.outputURL.map { [$0] } ?? [] : item.outputURLs
+        guard !files.isEmpty else { return }
+        let id = item.id
+        let finishedAt = item.finishedAt
+        Task { [weak self] in
+            let eligible = await MediaLibrary.photosCompatibleFiles(among: files)
+            // The item may have been removed or retried meanwhile.
+            guard let self, let item = self.item(withID: id), item.state == .completed,
+                  item.finishedAt == finishedAt else { return }
+            self.photoEligibleFiles[id] = eligible
+            if thenSave, !eligible.isEmpty {
+                self.saveToPhotos(item)
+            }
+        }
     }
 
     // MARK: - Persistence

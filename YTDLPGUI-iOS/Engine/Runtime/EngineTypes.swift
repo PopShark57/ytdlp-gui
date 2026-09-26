@@ -83,8 +83,9 @@ enum EngineEvent: Equatable, Sendable {
     case progress(DownloadProgressSnapshot, status: EngineProgressStatus)
     case postProcessing(name: String, status: EnginePostProcessStatus, filePath: String?)
     case item(EngineItemInfo)
-    /// A finished file at its final location.
-    case file(path: String)
+    /// A finished file at its final location. `isMain` is false for a file kept beside the main
+    /// one, such as the audio track of a video and audio pair that couldn't be merged.
+    case file(path: String, isMain: Bool = true)
 }
 
 /// How a download job ended.

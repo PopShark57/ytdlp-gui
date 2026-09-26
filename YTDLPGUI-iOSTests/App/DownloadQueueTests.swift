@@ -172,6 +172,122 @@ struct DownloadQueueTests {
         #expect(item.displayTitle == "https://www.youtube.com/playlist?list=PL1")
     }
 
+    @Test("Every file of a multi-file download is recorded, in queue and history")
+    func multiFileResults() async throws {
+        let env = try AppTestEnvironment()
+        var options = DownloadOptions()
+        options.downloadPlaylist = true
+        let item = env.queue.enqueue(url: "https://www.youtube.com/playlist?list=PL1", options: options).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        let files = try ["1 - First.mp4", "2 - Second.mp4", "3 - Third.mp4"].enumerated().map { index, name in
+            try env.makeDownloadedFile(named: name, bytes: 1_000 * (index + 1))
+        }
+        for file in files {
+            job.send(.file(path: file.path(percentEncoded: false)))
+        }
+        job.succeed(files: files.map { $0.path(percentEncoded: false) })
+        try await waitUntil("completion") { item.state == .completed }
+
+        #expect(item.outputURLs.map(\.standardizedFileURL) == files.map(\.standardizedFileURL))
+        // The last video stands for the playlist.
+        #expect(item.outputURL?.standardizedFileURL == files[2].standardizedFileURL)
+        #expect(item.completedFileSize == 6_000)
+        #expect(item.completedItemCount == 3)
+
+        let entry = try #require(env.history.entries.first)
+        #expect(entry.outputPaths == files.map { $0.path(percentEncoded: false) })
+        #expect(entry.fileSizeBytes == 6_000)
+        #expect(entry.outputURLs.map(\.standardizedFileURL) == files.map(\.standardizedFileURL))
+        #expect(entry.existingOutputURLs.count == 3)
+        #expect(!entry.isFileMissing)
+
+        // One file gone isn't the entry's files gone.
+        try FileManager.default.removeItem(at: files[0])
+        #expect(entry.existingOutputURLs.count == 2)
+        #expect(!entry.isFileMissing)
+        #expect(MissingFiles.warning(missing: 1, of: 3) == "1 of 3 files have been moved or deleted.")
+    }
+
+    @Test("History finds every file of an entry after the app's container moved")
+    func outputURLsAreReRooted() throws {
+        let documents = try #require(FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first)
+        let folder = "YTDLPGUITests-\(UUID().uuidString)"
+        let directory = documents.appending(path: folder, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["1.mp4", "2.mp4"] {
+            try Data("clip".utf8).write(to: directory.appending(path: name))
+        }
+
+        let stale = "/var/mobile/Containers/Data/Application/OLD-INSTALL/Documents/\(folder)"
+        let entry = HistoryEntry(
+            title: "Playlist",
+            sourceURL: url,
+            outputPath: "\(stale)/2.mp4",
+            outputPaths: ["\(stale)/1.mp4", "\(stale)/2.mp4"],
+            formatSummary: "Best",
+            kind: .video,
+            succeeded: true
+        )
+        #expect(entry.outputURLs.map { $0.path(percentEncoded: false) } == [
+            directory.appending(path: "1.mp4").path(percentEncoded: false),
+            directory.appending(path: "2.mp4").path(percentEncoded: false),
+        ])
+        #expect(entry.existingOutputURLs.count == 2)
+        #expect(!entry.isFileMissing)
+    }
+
+    @Test("A video whose audio was kept beside it is named by the video, not the audio")
+    func keptSeparateVideo() async throws {
+        let env = try AppTestEnvironment()
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+
+        let video = try env.makeDownloadedFile(named: "clip.mp4", bytes: 3_000)
+        let audio = try env.makeDownloadedFile(named: "clip.m4a", bytes: 1_000)
+        job.send(.file(path: video.path(percentEncoded: false), isMain: true))
+        job.send(.file(path: audio.path(percentEncoded: false), isMain: false))
+        job.succeed(files: [video.path(percentEncoded: false), audio.path(percentEncoded: false)])
+        try await waitUntil("completion") { item.state == .completed }
+
+        #expect(item.outputURL?.standardizedFileURL == video.standardizedFileURL)
+        #expect(item.outputURLs.count == 2)
+        #expect(item.completedFileSize == 4_000)
+        // One video, even though two files arrived.
+        #expect(item.completedItemCount == 1)
+        let entry = try #require(env.history.entries.first)
+        #expect(entry.outputPath == video.path(percentEncoded: false))
+        #expect(entry.fileName == "clip.mp4")
+    }
+
+    @Test("Without file events, the first file the job listed stands for the download")
+    func mainFileWithoutEvents() async throws {
+        let env = try AppTestEnvironment()
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+        let video = try env.makeDownloadedFile(named: "clip.mp4")
+        let audio = try env.makeDownloadedFile(named: "clip.m4a")
+        job.succeed(files: [video.path(percentEncoded: false), audio.path(percentEncoded: false)])
+        try await waitUntil("completion") { item.state == .completed }
+        #expect(item.outputURL?.standardizedFileURL == video.standardizedFileURL)
+    }
+
+    @Test("Photos eligibility is worked out once the download completes; audio never qualifies")
+    func photoEligibility() async throws {
+        let env = try AppTestEnvironment()
+        let item = env.queue.enqueue(url: url, options: DownloadOptions()).item
+        let job = try #require(try await waitForJobs(1, on: env.downloader).first)
+        let song = try env.makeDownloadedFile(named: "song.m4a")
+        job.send(.file(path: song.path(percentEncoded: false)))
+        job.succeed(files: [song.path(percentEncoded: false)])
+        try await waitUntil("completion") { item.state == .completed }
+
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!env.queue.canSaveToPhotos(item))
+        #expect(env.queue.photoSaveState(for: item) == .notSaved)
+    }
+
     // MARK: - Failures
 
     @Test("A failed download is classified from its log")

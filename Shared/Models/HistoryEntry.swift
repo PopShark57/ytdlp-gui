@@ -138,10 +138,9 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
         return stored
     }
 
-    /// Whether the downloaded file is still where we left it.
+    /// Whether any of the downloaded files is still where we left it.
     var fileExists: Bool {
-        guard let outputURL else { return false }
-        return FileManager.default.fileExists(atPath: outputURL.path(percentEncoded: false))
+        outputURLs.contains { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
     }
 
     var fileName: String? {

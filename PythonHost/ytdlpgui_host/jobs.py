@@ -359,22 +359,25 @@ class FileReporterPP(_ReporterPP):
     """Runs at `after_move`, once a video's files are at their final location."""
 
     def run(self, info):
-        for path in _final_paths(info):
+        for path, is_main in _final_paths(info):
             self._job.files.append(path)
-            self._job.emit({'type': 'file', 'path': path})
+            # `main` tells the video apart from a companion kept beside it, so the app names the
+            # video, not its separate audio track.
+            self._job.emit({'type': 'file', 'path': path, 'main': is_main})
         return [], info
 
 
 def _final_paths(info):
+    """The video's final file, then any companions kept beside it, as (path, is_main) pairs."""
     main = info.get('filepath')
     if not main:
         return []
-    paths = [main]
+    paths = [(main, True)]
     # Files a post-processor kept alongside the main one (see MergerPP in postprocessors.py).
     # MoveFilesAfterDownloadPP moved them into the same folder under their own names.
     folder = os.path.dirname(main)
     for kept in info.get(KEPT_FILES_KEY) or ():
         path = os.path.join(folder, os.path.basename(kept))
         if path != main and os.path.exists(path):
-            paths.append(path)
+            paths.append((path, False))
     return paths

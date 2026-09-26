@@ -142,7 +142,7 @@ tool: 0 success, 1 error, 101 cancelled.
 {"type": "postprocess", "status": "started|processing|finished", "postprocessor": "Merger", "filepath": "…"}
 {"type": "item", "id", "title", "uploader", "thumbnail", "duration", "webpage_url", "extractor",
  "playlist_index", "playlist_count"}
-{"type": "file", "path": "…"}
+{"type": "file", "path": "…", "main": true}
 ```
 
 - `log` messages are one line each, formatted exactly as the command-line tool would print them
@@ -150,7 +150,10 @@ tool: 0 success, 1 error, 101 cancelled.
   `ProgressParser` and `DownloadFailure.classify` work on them unchanged.
 - `progress` is throttled to five updates a second per job; `finished` and `error` always pass.
 - `item` is sent at yt-dlp's `pre_process` stage for every video, before any bytes move.
-- `file` is sent at `after_move` for every finished video, with its final path.
+- `file` is sent at `after_move` for every finished video, with its final path, and then for each
+  file kept beside it with `"main": false` (the audio of a pair AVFoundation couldn't merge). The
+  queue records every file (`DownloadItem.outputURLs`, `HistoryEntry.outputPaths`) and names the
+  download after the last main file, never after a kept companion. A missing `main` means `true`.
 
 ### Requests (Python → Swift, via `_ytdlpgui.request`)
 

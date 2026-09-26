@@ -45,15 +45,35 @@ final class MediaLibrary {
         case audio
     }
 
-    /// Whether Photos can take this file (a compatible video or an image).
-    func canSaveToPhotos(_ url: URL) -> Bool {
+    /// Whether Photos can take this file: a video this device can play, or a picture.
+    ///
+    /// Checking a video reads the file, so this isn't for view bodies: use
+    /// `photosCompatibleFiles(among:)` from a task, or `isPhotosMediaType(_:)` to decide whether
+    /// to offer saving at all.
+    nonisolated static func isPhotosCompatible(_ url: URL) -> Bool {
         guard url.isFileURL, FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
             return false
         }
-        switch Self.kind(of: url) {
+        switch kind(of: url) {
         case .video: return UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(url.path(percentEncoded: false))
         case .image: return true
         case .audio, nil: return false
+        }
+    }
+
+    /// The files Photos can take, worked out off the main actor.
+    nonisolated static func photosCompatibleFiles(among files: [URL]) async -> [URL] {
+        await Task.detached(priority: .userInitiated) {
+            files.filter { MediaLibrary.isPhotosCompatible($0) }
+        }.value
+    }
+
+    /// Whether the file is a video or a picture, judged by its name alone. Cheap enough for a
+    /// menu; whether Photos can really take it is checked when saving.
+    nonisolated static func isPhotosMediaType(_ url: URL) -> Bool {
+        switch kind(of: url) {
+        case .video, .image: true
+        case .audio, nil: false
         }
     }
 
@@ -110,7 +130,24 @@ final class MediaLibrary {
         }
     }
 
-    private static func kind(of url: URL) -> MediaKind? {
+    /// Saves each of the files Photos can take, and says how many that was. Throws when there
+    /// were none, or when saving one of them failed.
+    @discardableResult
+    func saveToPhotos(_ files: [URL]) async throws -> Int {
+        let compatible = await Self.photosCompatibleFiles(among: files)
+        guard !compatible.isEmpty else {
+            // Trying the first one explains why it can't be saved.
+            guard let first = files.first else { return 0 }
+            try await saveToPhotos(first)
+            return 1
+        }
+        for file in compatible {
+            try await saveToPhotos(file)
+        }
+        return compatible.count
+    }
+
+    private nonisolated static func kind(of url: URL) -> MediaKind? {
         guard let type = UTType(filenameExtension: url.pathExtension) else { return nil }
         if type.conforms(to: .movie) { return .video }
         if type.conforms(to: .image) { return .image }

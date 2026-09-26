@@ -21,7 +21,9 @@ enum EngineEventDecoder {
         case "item":
             return .item(item(from: object))
         case "file":
-            return EngineJSON.nonEmptyString(object["path"]).map { .file(path: $0) }
+            // Hosts before `main` existed only reported main files.
+            let isMain = EngineJSON.bool(object["main"]) ?? true
+            return EngineJSON.nonEmptyString(object["path"]).map { .file(path: $0, isMain: isMain) }
         default:
             return nil
         }

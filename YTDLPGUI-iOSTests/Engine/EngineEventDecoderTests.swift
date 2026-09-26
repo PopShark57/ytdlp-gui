@@ -130,9 +130,11 @@ struct EngineEventDecoderTests {
         #expect(event == .item(expected))
     }
 
-    @Test("File events need a path")
+    @Test("File events need a path, and say whether the file is a kept companion")
     func file() {
-        #expect(decode(#"{"type": "file", "path": "/Documents/a b.mp4"}"#) == .file(path: "/Documents/a b.mp4"))
+        #expect(decode(#"{"type": "file", "path": "/Documents/a b.mp4"}"#) == .file(path: "/Documents/a b.mp4", isMain: true))
+        #expect(decode(#"{"type": "file", "path": "/Documents/a.mp4", "main": true}"#) == .file(path: "/Documents/a.mp4", isMain: true))
+        #expect(decode(#"{"type": "file", "path": "/Documents/a.webm", "main": false}"#) == .file(path: "/Documents/a.webm", isMain: false))
         #expect(decode(#"{"type": "file", "path": ""}"#) == nil)
         #expect(decode(#"{"type": "file"}"#) == nil)
     }

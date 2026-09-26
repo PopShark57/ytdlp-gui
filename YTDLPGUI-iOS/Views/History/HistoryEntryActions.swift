@@ -7,25 +7,32 @@ import UIKit
 /// always offer the same things under the same conditions.
 struct HistoryEntryActionItems: View {
     let entry: HistoryEntry
-    var onOpen: (URL) -> Void
-    var onSaveToPhotos: (URL) -> Void
+    /// The files Photos can take, when the caller has worked them out (the detail screen does,
+    /// in a task). Otherwise saving is offered for any video or picture, and the files are
+    /// checked when saving.
+    var photoFiles: [URL]?
+    /// Shows the files in Quick Look.
+    var onOpen: ([URL]) -> Void
+    var onSaveToPhotos: ([URL]) -> Void
     var onDelete: () -> Void
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let url = entry.existingOutputURL {
+        let files = entry.existingOutputURLs
+        if !files.isEmpty {
             Button {
-                onOpen(url)
+                onOpen(files)
             } label: {
                 Label("Open", systemImage: "eye")
             }
-            ShareLink(item: url) {
-                Label("Share", systemImage: "square.and.arrow.up")
+            ShareLink(items: files) {
+                Label(files.count > 1 ? "Share \(files.count) Files" : "Share", systemImage: "square.and.arrow.up")
             }
-            if model.library.canSaveToPhotos(url) {
+            let photos = photoFiles ?? files.filter { MediaLibrary.isPhotosMediaType($0) }
+            if !photos.isEmpty {
                 Button {
-                    onSaveToPhotos(url)
+                    onSaveToPhotos(photos)
                 } label: {
                     Label("Save to Photos", systemImage: "photo.badge.plus")
                 }
@@ -53,6 +60,20 @@ struct HistoryEntryActionItems: View {
 
         Button(role: .destructive, action: onDelete) {
             Label("Remove from History", systemImage: "trash")
+        }
+    }
+}
+
+/// Saves a history entry's files to Photos and says how it went: a status message on success,
+/// `errorMessage` (shown by `PhotoSaveErrorAlert`) on failure.
+@MainActor
+func saveHistoryFilesToPhotos(_ files: [URL], model: AppModel, errorMessage: Binding<String?>) {
+    Task {
+        do {
+            let saved = try await model.library.saveToPhotos(files)
+            model.composer.showStatus(saved > 1 ? "Saved \(saved) files to Photos." : "Saved to Photos.")
+        } catch {
+            errorMessage.wrappedValue = error.localizedDescription
         }
     }
 }
