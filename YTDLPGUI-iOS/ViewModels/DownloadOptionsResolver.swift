@@ -35,6 +35,23 @@ struct DownloadOptionsResolver {
         return resolved
     }
 
+    /// Options as the person chose them: the fields this install fills in (output folder,
+    /// archive and cookie paths, browser cookies, ignoring config files) set back to neutral
+    /// values, so they neither count as customisations nor carry a path that goes stale when the
+    /// container moves.
+    nonisolated static func editable(
+        _ options: DownloadOptions,
+        downloadsDirectory: URL = DownloadOptions.defaultDownloadsDirectory
+    ) -> DownloadOptions {
+        var editable = options
+        editable.outputDirectory = downloadsDirectory
+        editable.downloadArchivePath = ""
+        editable.cookieFilePath = ""
+        editable.cookieBrowser = .none
+        editable.ignoreUserConfig = true
+        return editable
+    }
+
     /// Custom arguments with everything the embedded engine refuses taken out, plus the names
     /// of the options that were removed so the person can be told.
     nonisolated static func sanitizedCustomArguments(_ input: String) -> (arguments: String, removed: [String]) {

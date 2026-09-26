@@ -73,7 +73,7 @@ final class DownloadComposer {
         self.analyzer = analyzer
         self.status = status
         self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
-        self.options = Self.editableOptions(from: settings.storedOptions, downloadsDirectory: storage.downloadsDirectory)
+        self.options = DownloadOptionsResolver.editable(settings.storedOptions, downloadsDirectory: storage.downloadsDirectory)
     }
 
     // MARK: - Derived state
@@ -199,7 +199,7 @@ final class DownloadComposer {
     /// Replaces the options, e.g. with those of a history entry. Paths and anything the embedded
     /// engine refuses are dropped; the app fills in its own when downloading.
     func loadOptions(_ options: DownloadOptions) {
-        var editable = Self.editableOptions(from: options, downloadsDirectory: self.options.outputDirectory)
+        var editable = DownloadOptionsResolver.editable(options, downloadsDirectory: self.options.outputDirectory)
         editable.customArguments = DownloadOptionsResolver.sanitizedCustomArguments(options.customArguments).arguments
         self.options = editable
     }
@@ -368,7 +368,8 @@ final class DownloadComposer {
             }
         }
 
-        // The person's own choices, not the resolved copy, so no path is remembered.
+        // The Download screen is where options are chosen, so this is the one place that
+        // remembers them for next time (and for the Share sheet and Shortcuts).
         settings.rememberOptions(options)
         clearURLAfterQueueing()
         return true
@@ -428,18 +429,6 @@ final class DownloadComposer {
             option.reset(&reset)
         }
         options = reset
-    }
-
-    /// Options as the Download screen edits them: the person's choices, with the fields the
-    /// app manages cleared so they neither count as customisations nor carry stale paths.
-    private static func editableOptions(from options: DownloadOptions, downloadsDirectory: URL) -> DownloadOptions {
-        var editable = options
-        editable.outputDirectory = downloadsDirectory
-        editable.downloadArchivePath = ""
-        editable.cookieFilePath = ""
-        editable.cookieBrowser = .none
-        editable.ignoreUserConfig = true
-        return editable
     }
 }
 

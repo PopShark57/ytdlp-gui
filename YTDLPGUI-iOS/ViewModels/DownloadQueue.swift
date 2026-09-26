@@ -168,7 +168,6 @@ final class DownloadQueue {
             playlistCount: info?.playlistCount
         )
         items.append(item)
-        settings.rememberOptions(options)
         queueDidChange()
         return .added(item)
     }

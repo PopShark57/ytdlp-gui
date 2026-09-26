@@ -378,6 +378,37 @@ struct AppModelTests {
         #expect(model.status.message != nil)
     }
 
+    @Test("Only the Download screen changes the remembered options")
+    func rememberedOptions() async throws {
+        let env = try AppTestEnvironment()
+        env.settings.autoAnalyzePastedURLs = false
+        let model = env.makeAppModel()
+        await model.performLaunchSetup()
+        var remembered = DownloadOptions()
+        remembered.embedMetadata = true
+        env.settings.rememberOptions(remembered)
+
+        // The Share sheet, Shortcuts and Download Again use them without changing them.
+        env.sharedLinks = [SharedLink(urls: ["https://example.com/a", "https://example.com/b"], kind: .audio, created: Date())]
+        model.handleScenePhaseChange(.active)
+        model.enqueueFromShortcut(url: "https://example.com/c", kind: .audio)
+        var historyOptions = DownloadOptions()
+        historyOptions.kind = .audio
+        historyOptions.subtitleMode = .both
+        model.downloadAgain(HistoryEntry(title: "D", sourceURL: "https://example.com/d", formatSummary: "Best", kind: .audio, succeeded: true, options: historyOptions))
+        #expect(model.queue.items.count == 4)
+        #expect(env.settings.storedOptions.kind == .video)
+        #expect(env.settings.storedOptions.subtitleMode == .off)
+        #expect(env.settings.storedOptions.embedMetadata)
+
+        // Choosing on the Download screen does.
+        model.composer.options.kind = .audio
+        model.acceptPastedText("https://example.com/e")
+        model.startDownload()
+        #expect(env.settings.storedOptions.kind == .audio)
+        #expect(env.settings.storedOptions.cookieFilePath.isEmpty)
+    }
+
     @Test("Showing a queue item selects it on the Queue tab")
     func showQueueItem() throws {
         let env = try AppTestEnvironment()

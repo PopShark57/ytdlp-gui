@@ -112,7 +112,7 @@ struct DownloadQueueTests {
         #expect(commandLine.contains("http://PRIVATE@h:1"))
     }
 
-    @Test("History and the last-used options don't keep credentials; the saved queue does, out of backups")
+    @Test("History doesn't keep credentials; the saved queue does, out of backups")
     func secretsStayOutOfHistory() async throws {
         let env = try AppTestEnvironment()
         env.settings.maximumConcurrentDownloads = 1
@@ -122,9 +122,6 @@ struct DownloadQueueTests {
         let item = env.queue.enqueue(url: url, options: options).item
         let waiting = env.queue.enqueue(url: "https://example.com/b", options: options).item
         let job = try #require(try await waitForJobs(1, on: env.downloader).first)
-
-        #expect(env.settings.storedOptions.customArguments == "--no-mtime")
-        #expect(env.settings.storedOptions.proxy == "http://proxy.test:3128")
 
         // The waiting download needs its password to run after a relaunch.
         env.queue.flushPersistence()

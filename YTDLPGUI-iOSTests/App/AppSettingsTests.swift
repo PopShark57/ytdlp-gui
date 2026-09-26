@@ -76,7 +76,7 @@ struct AppSettingsTests {
         #expect(AppSettings(defaults: suite.defaults).maximumConcurrentDownloads == 4)
     }
 
-    @Test("The last options are remembered, but never their folder")
+    @Test("The last options are remembered, but never a path or other app-managed field")
     func storedOptions() throws {
         let suite = try Suite()
         let settings = AppSettings(defaults: suite.defaults)
@@ -84,9 +84,18 @@ struct AppSettingsTests {
         options.kind = .audio
         options.audioFormat = .alac
         options.subtitleMode = .both
+        options.useDownloadArchive = true
         options.outputDirectory = URL(fileURLWithPath: "/var/mobile/Containers/Data/Application/OLD/Documents")
+        options.downloadArchivePath = "/var/mobile/Containers/Data/Application/OLD/archive.txt"
+        options.cookieFilePath = "/var/mobile/Containers/Data/Application/OLD/cookies.txt"
+        options.cookieBrowser = .safari
         settings.rememberOptions(options)
-        #expect(settings.storedOptions == options)
+        #expect(settings.storedOptions.kind == .audio)
+        #expect(settings.storedOptions.useDownloadArchive)
+        #expect(settings.storedOptions.outputDirectory == DownloadOptions.defaultDownloadsDirectory)
+        #expect(settings.storedOptions.downloadArchivePath.isEmpty)
+        #expect(settings.storedOptions.cookieFilePath.isEmpty)
+        #expect(settings.storedOptions.cookieBrowser == .none)
 
         let restored = AppSettings(defaults: suite.defaults).storedOptions
         #expect(restored.kind == .audio)
