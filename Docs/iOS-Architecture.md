@@ -66,7 +66,8 @@ YTDLPGUI-iOS.app/
 | `Library/Caches/yt-dlp/` | yt-dlp's own cache (`cachedir`). |
 | `Library/Application Support/YTDLPGUI/history.json` | Download history (shared `HistoryStore`). Saved without credentials. |
 | `Library/Application Support/YTDLPGUI/queue.json` | Unfinished downloads, with their full options. Excluded from backups. |
-| `Library/Application Support/Engine/yt-dlp/` | An installed yt-dlp update (`yt_dlp/`, `yt_dlp_ejs/`), if any. |
+| `Library/Application Support/Engine/yt-dlp/versions/<name>/` | Installed yt-dlp updates (`yt_dlp/`, `yt_dlp_ejs/`), one folder each. |
+| `Library/Application Support/Engine/yt-dlp/current` | The name of the update folder to use. No file means the bundled yt-dlp. |
 | `Library/Application Support/Engine/staging/` | Scratch space while an update is installed. |
 | `Library/Application Support/Cookies/cookies.txt` | The imported cookies file, if any. |
 | `Library/Application Support/download-archive.txt` | The download archive. |
@@ -293,10 +294,20 @@ can be disabled (a setting), so the screen doesn't lock mid-download.
 Extractors break whenever sites change, so an app that could never update yt-dlp would stop
 working within weeks. Settings › Engine checks PyPI for the newest release; installing it
 downloads the yt-dlp wheel and the yt-dlp-ejs release that version expects, verifies both against
-the SHA-256 digests PyPI publishes, unpacks them into a staging folder, and swaps that into
-`Application Support/Engine/yt-dlp/`. The update takes effect at the next launch. If it ever fails
-to import, the engine falls back to the bundled copy and says so. “Use Bundled Version” deletes the
-update.
+the SHA-256 digests PyPI publishes, unpacks them into a staging folder, and moves that into a new
+folder, `Application Support/Engine/yt-dlp/versions/<UUID>/`. The app then writes that folder's
+name to `Engine/yt-dlp/current`. The update takes effect at the next launch. If it ever fails to
+import, the engine falls back to the bundled copy and says so. “Use Bundled Version” removes
+`current`.
+
+No update folder is changed or removed while the app runs. yt-dlp imports each extractor the
+first time a site is used, and the challenge solver reads its scripts on each use, both from the
+folder the interpreter started with. Replacing or deleting that folder mid-session would mix two
+yt-dlp versions or fail with `ModuleNotFoundError`. So the host refuses to install into a folder
+that exists, and folders nothing points at any more are deleted at the next launch, before Python
+starts (`EngineConfiguration.prepareUpdatesForLaunch`). That step also moves an update installed
+by an earlier build, which lived directly in `Engine/yt-dlp/`, into a folder of its own and keeps
+using it. Installing and reverting are therefore safe while downloads run.
 
 ## Testing
 

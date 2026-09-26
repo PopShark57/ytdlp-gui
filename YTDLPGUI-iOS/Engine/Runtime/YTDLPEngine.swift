@@ -104,6 +104,11 @@ final class YTDLPEngine: Sendable {
     private static func startSynchronously(configuration: EngineConfiguration, router: EngineRequestRouter) throws -> EngineInfo {
         try configuration.validateRuntime()
         configuration.createCacheDirectories()
+        // Only while nothing can be importing from the update folders: a retried start (after a
+        // failed `configure`) finds the interpreter already running.
+        if !PythonRuntime.isRunning {
+            configuration.prepareUpdatesForLaunch()
+        }
         EngineCallbackHub.shared.install(router)
         try PythonRuntime.start(
             pythonHome: configuration.pythonHome,
@@ -112,7 +117,7 @@ final class YTDLPEngine: Sendable {
         )
         let payload = try encode(ConfigurePayload(
             cacheDirectory: configuration.cacheDirectory.path(percentEncoded: false),
-            updateDirectory: configuration.hasInstalledUpdate ? configuration.updateDirectory.path(percentEncoded: false) : nil,
+            updateDirectory: configuration.activeUpdateDirectory?.path(percentEncoded: false),
             platformVersion: configuration.platformVersion
         ))
         do {
@@ -251,27 +256,31 @@ final class YTDLPEngine: Sendable {
     /// Downloads, verifies and installs the newest yt-dlp release (with the matching
     /// yt-dlp-ejs). Takes effect the next time the app launches, because a running interpreter
     /// cannot safely swap out a package it has already imported.
+    ///
+    /// The update goes into a new folder, so the one the running engine imports from is never
+    /// touched and downloads carry on unaffected (see `EngineConfiguration`'s installed updates).
     func installLatestUpdate() async throws -> String {
         _ = try await start()
         try configuration.prepareUpdateFolder()
+        let destination = configuration.makeNewUpdateDirectory()
         let payload = try Self.encode(InstallPayload(
             stagingDirectory: configuration.stagingDirectory.path(percentEncoded: false),
-            updateDirectory: configuration.updateDirectory.path(percentEncoded: false)
+            updateDirectory: destination.path(percentEncoded: false)
         ))
         let reply = await EngineThread.run(named: "YTDLP GUI update install") {
             PythonRuntime.call("install_update", payload: payload)
         }
         let version = try EngineReplyDecoder.installedVersion(from: reply)
+        try configuration.activate(destination)
         restartRequired.withLock { $0 = true }
         return version
     }
 
-    /// Removes any installed update so the bundled yt-dlp is used from the next launch.
+    /// Uses the bundled yt-dlp from the next launch. Only the pointer to the installed update is
+    /// removed; its folder, which the running engine may still import from, goes at the next
+    /// launch.
     func revertToBundledVersion() throws {
-        let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: configuration.updateDirectory.path(percentEncoded: false)) {
-            try fileManager.removeItem(at: configuration.updateDirectory)
-        }
+        try configuration.deactivate()
         // A restart matters only if the running interpreter imported the update; reverting an
         // update installed during this session cancels the restart it asked for.
         let loadedSource: YTDLPSource? = startPhase.withLock { phase in

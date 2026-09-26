@@ -150,8 +150,8 @@ final class EngineController {
         isRestartRequired = runtime.isRestartRequired
     }
 
-    /// Removes an installed update so the copy of yt-dlp bundled with the app is used from the
-    /// next launch.
+    /// Uses the copy of yt-dlp bundled with the app from the next launch. The installed update's
+    /// files stay until then, because running downloads may still need them.
     func revertToBundledVersion() {
         guard !isUpdateInFlight else { return }
         do {
