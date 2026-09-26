@@ -63,6 +63,7 @@ final class DownloadComposer {
         queue: DownloadQueue,
         storage: StorageManager,
         cookies: CookieStore,
+        resolver: DownloadOptionsResolver,
         analyzer: any AnalysisEngine,
         status: StatusCenter
     ) {
@@ -72,7 +73,7 @@ final class DownloadComposer {
         self.cookies = cookies
         self.analyzer = analyzer
         self.status = status
-        self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
+        self.resolver = resolver
         self.options = DownloadOptionsResolver.editable(settings.storedOptions, downloadsDirectory: storage.downloadsDirectory)
     }
 
@@ -344,12 +345,12 @@ final class DownloadComposer {
             return false
         }
 
+        // The queue fills in this install's paths as it adds each link.
         let urls = detectedURLs
-        let queuedOptions = resolver.resolve(options)
 
         if urls.count == 1, let url = urls.first {
             let info = analysis.info.flatMap { $0.originalURL == url ? $0 : nil }
-            guard case .added = queue.enqueue(url: url, options: queuedOptions, info: info) else {
+            guard case .added = queue.enqueue(url: url, options: options, info: info) else {
                 // The link stays in the field, so nothing typed is lost.
                 status.show("That link is already in the queue.")
                 return false
@@ -360,7 +361,7 @@ final class DownloadComposer {
                 status.show("Added 1 download to the queue.")
             }
         } else {
-            let added = queue.enqueue(urls: urls, options: queuedOptions)
+            let added = queue.enqueue(urls: urls, options: options)
             switch added.count {
             case 0: status.show("Those downloads are already in the queue.")
             case 1: status.show("Added 1 download to the queue.")

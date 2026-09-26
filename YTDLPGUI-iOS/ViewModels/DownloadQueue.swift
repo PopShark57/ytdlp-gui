@@ -116,8 +116,7 @@ final class DownloadQueue {
         history: HistoryStore,
         notifications: NotificationService,
         library: MediaLibrary,
-        storage: StorageManager,
-        cookies: CookieStore,
+        resolver: DownloadOptionsResolver,
         store: QueueStore = QueueStore()
     ) {
         self.settings = settings
@@ -126,7 +125,7 @@ final class DownloadQueue {
         self.history = history
         self.notifications = notifications
         self.library = library
-        self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
+        self.resolver = resolver
         self.store = store
         observeConcurrencyLimit()
     }

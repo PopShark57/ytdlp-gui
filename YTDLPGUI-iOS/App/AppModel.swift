@@ -73,7 +73,6 @@ final class AppModel {
 
     private let clipboard: any ClipboardLinkDetecting
     private let drainSharedInbox: () -> [SharedLink]
-    private let resolver: DownloadOptionsResolver
     /// The clipboard's `changeCount` when it was last looked at, so the same contents are only
     /// ever offered once.
     @ObservationIgnored private var lastCheckedClipboardChangeCount: Int?
@@ -87,6 +86,8 @@ final class AppModel {
         let notifications = NotificationService()
         let library = MediaLibrary()
         let status = StatusCenter()
+        // One resolver for everything that turns options into arguments.
+        let resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
         let engine = EngineController(engine: .shared, temporaryDirectory: storage.partialDownloadsDirectory)
         let queue = DownloadQueue(
             settings: settings,
@@ -95,8 +96,7 @@ final class AppModel {
             history: history,
             notifications: notifications,
             library: library,
-            storage: storage,
-            cookies: cookies
+            resolver: resolver
         )
         let composer = DownloadComposer(
             settings: settings,
@@ -104,6 +104,7 @@ final class AppModel {
             queue: queue,
             storage: storage,
             cookies: cookies,
+            resolver: resolver,
             analyzer: YTDLPEngine.shared,
             status: status
         )
@@ -153,7 +154,6 @@ final class AppModel {
         self.status = status
         self.clipboard = clipboard
         self.drainSharedInbox = drainSharedInbox
-        self.resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
 
         storage.isPartialDownloadInUse = { [weak queue] in
             (queue?.activeCount ?? 0) > 0
@@ -277,7 +277,7 @@ final class AppModel {
             if let kind = link.kind {
                 var options = settings.storedOptions
                 options.kind = kind
-                queuedCount += queue.enqueue(urls: link.urls, options: resolver.resolve(options)).count
+                queuedCount += queue.enqueue(urls: link.urls, options: options).count
             } else {
                 linksForComposer += link.urls
             }
@@ -303,7 +303,7 @@ final class AppModel {
     func enqueueFromShortcut(url: String, kind: DownloadKind?) -> Bool {
         var options = settings.storedOptions
         if let kind { options.kind = kind }
-        let added = queue.enqueue(urls: [url], options: resolver.resolve(options))
+        let added = queue.enqueue(urls: [url], options: options)
         selectedTab = .queue
         return !added.isEmpty
     }
@@ -337,7 +337,7 @@ final class AppModel {
         options.customArguments = sanitized.arguments
 
         let item: DownloadItem
-        switch queue.enqueue(url: entry.sourceURL, options: resolver.resolve(options)) {
+        switch queue.enqueue(url: entry.sourceURL, options: options) {
         case .added(let added):
             item = added
         case .alreadyPending(let pending):

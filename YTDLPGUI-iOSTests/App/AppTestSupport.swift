@@ -199,6 +199,7 @@ final class AppTestEnvironment {
     let notifications: NotificationService
     let library: MediaLibrary
     let engine: EngineController
+    let resolver: DownloadOptionsResolver
     let queueStoreURL: URL
     private(set) var queue: DownloadQueue
     private(set) var composer: DownloadComposer
@@ -227,6 +228,7 @@ final class AppTestEnvironment {
         notifications = NotificationService()
         library = MediaLibrary()
         engine = EngineController(runtime: runtime, temporaryDirectory: storage.partialDownloadsDirectory)
+        resolver = DownloadOptionsResolver(storage: storage, cookies: cookies)
         queueStoreURL = applicationSupport.appending(path: "YTDLPGUI/queue.json")
 
         let queue = DownloadQueue(
@@ -236,8 +238,7 @@ final class AppTestEnvironment {
             history: history,
             notifications: notifications,
             library: library,
-            storage: storage,
-            cookies: cookies,
+            resolver: resolver,
             store: QueueStore(fileURL: queueStoreURL)
         )
         self.queue = queue
@@ -247,6 +248,7 @@ final class AppTestEnvironment {
             queue: queue,
             storage: storage,
             cookies: cookies,
+            resolver: resolver,
             analyzer: analyzer,
             status: status
         )
@@ -266,8 +268,7 @@ final class AppTestEnvironment {
             history: history,
             notifications: notifications,
             library: library,
-            storage: storage,
-            cookies: cookies,
+            resolver: resolver,
             store: QueueStore(fileURL: queueStoreURL)
         )
     }

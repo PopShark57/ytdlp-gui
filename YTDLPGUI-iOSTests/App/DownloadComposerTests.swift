@@ -342,6 +342,7 @@ struct DownloadComposerTests {
             queue: env.queue,
             storage: env.storage,
             cookies: env.cookies,
+            resolver: env.resolver,
             analyzer: env.analyzer,
             status: env.status
         )
