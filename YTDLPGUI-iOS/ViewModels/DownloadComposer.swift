@@ -28,6 +28,7 @@ final class DownloadComposer {
     var urlText: String = "" {
         didSet {
             guard urlText != oldValue else { return }
+            detectedURLs = URLDetection.urlsFromLines(urlText)
             analyzeWhenReady = false
             // Any previous analysis describes a different link now.
             if analysis != .idle, detectedURLs != analyzedURL.map({ [$0] }) {
@@ -77,9 +78,10 @@ final class DownloadComposer {
     // MARK: - Derived state
 
     /// The links in the field. More than one means the text was a list or a paragraph.
-    var detectedURLs: [String] {
-        URLDetection.urlsFromLines(urlText)
-    }
+    ///
+    /// Worked out once per change of `urlText`, its only input: finding links in free text
+    /// creates a data detector, and the Download screen reads this many times per keystroke.
+    private(set) var detectedURLs: [String] = []
 
     var hasValidURL: Bool { !detectedURLs.isEmpty }
 

@@ -87,10 +87,10 @@ struct LogConsoleView: View {
                         .foregroundStyle(.secondary)
                         .padding(.bottom, 6)
                 }
-                ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
-                    Text(line)
+                ForEach(visibleLines) { line in
+                    Text(line.text)
                         .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(color(for: line))
+                        .foregroundStyle(color(for: line.text))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
@@ -162,10 +162,20 @@ struct LogConsoleView: View {
 
     // MARK: - Data
 
-    private var visibleLines: [String] {
+    /// A line, identified by its number among every line produced. That number stays with the
+    /// line when older ones are dropped from the front of the capped buffer, unlike its position,
+    /// so rows keep their identity (and any text selected in them) while output arrives.
+    private struct NumberedLine: Identifiable {
+        let id: Int
+        let text: String
+    }
+
+    private var visibleLines: [NumberedLine] {
+        let firstNumber = totalLineCount - lines.count
+        let numbered = lines.enumerated().map { NumberedLine(id: firstNumber + $0.offset, text: $0.element) }
         let query = filterText.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return lines }
-        return lines.filter { $0.localizedCaseInsensitiveContains(query) }
+        guard !query.isEmpty else { return numbered }
+        return numbered.filter { $0.text.localizedCaseInsensitiveContains(query) }
     }
 
     private var isTruncated: Bool { totalLineCount > lines.count }
