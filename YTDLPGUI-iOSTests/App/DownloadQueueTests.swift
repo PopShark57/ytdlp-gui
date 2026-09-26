@@ -322,6 +322,8 @@ struct DownloadQueueTests {
         job.fail(exitCode: 1, hostError: "The host couldn't parse the arguments.")
         try await waitUntil("failure") { item.state == .failed }
         #expect(item.failure == DownloadFailure(kind: .unknown, underlyingMessage: "The host couldn't parse the arguments."))
+        // The log, which people share, says why too.
+        #expect(item.log.lines.last == "ERROR: The host couldn't parse the arguments.")
     }
 
     @Test("A download fails clearly when the engine can't start")

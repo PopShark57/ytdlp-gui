@@ -453,6 +453,9 @@ final class DownloadQueue {
             item.completedFileSize = Self.totalSize(of: files.isEmpty ? item.outputURL.map { [$0] } ?? [] : files)
             finish(item, failure: nil)
         } else if let hostError = result.hostError {
+            // As the command-line tool would print it, so "Show Log" and a shared log explain
+            // the failure.
+            item.log.append("ERROR: \(hostError)")
             finish(item, failure: DownloadFailure(kind: .unknown, underlyingMessage: hostError))
         } else {
             finish(item, failure: DownloadFailure.classify(logLines: item.log.lines, exitCode: result.exitCode))
