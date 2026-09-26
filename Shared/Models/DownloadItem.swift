@@ -136,6 +136,7 @@ final class DownloadItem: Identifiable {
 
     func makeHistoryEntry() -> HistoryEntry {
         HistoryEntry(
+            downloadID: id,
             title: displayTitle,
             sourceURL: sourceURL,
             outputPath: outputURL?.path(percentEncoded: false),

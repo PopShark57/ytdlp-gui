@@ -3,9 +3,19 @@ import Foundation
 /// A completed (or failed) download, persisted between launches.
 struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
+    /// The queue item that produced this entry, so a notification about that download still
+    /// finds it after the queue has forgotten the item. A retried item produces several entries
+    /// with the same ID. `nil` for entries saved before it was recorded.
+    var downloadID: UUID?
     var title: String
     var sourceURL: String
+    /// The main file: the video, or the last video of a playlist.
     var outputPath: String?
+    /// Every file the download produced, in the order they were finished: one per video of a
+    /// playlist, or a video and its separate audio track when they couldn't be merged. At most
+    /// `maximumStoredOutputPaths`. `nil` for entries saved before they were recorded, which
+    /// only know `outputPath`.
+    var outputPaths: [String]?
     var date: Date
     var formatSummary: String
     var kind: DownloadKind
@@ -21,11 +31,16 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     /// was saved, e.g. `--password`, so "Download again" can say so. `nil` when nothing was.
     var removedSecretOptions: [String]?
 
+    /// Keeps `history.json` bounded for very long playlists.
+    static let maximumStoredOutputPaths = 500
+
     init(
         id: UUID = UUID(),
+        downloadID: UUID? = nil,
         title: String,
         sourceURL: String,
         outputPath: String? = nil,
+        outputPaths: [String]? = nil,
         date: Date = Date(),
         formatSummary: String,
         kind: DownloadKind,
@@ -39,9 +54,11 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
         removedSecretOptions: [String]? = nil
     ) {
         self.id = id
+        self.downloadID = downloadID
         self.title = title
         self.sourceURL = sourceURL
         self.outputPath = outputPath
+        self.outputPaths = outputPaths.map { Array($0.prefix(Self.maximumStoredOutputPaths)) }
         self.date = date
         self.formatSummary = formatSummary
         self.kind = kind
@@ -71,14 +88,27 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
 
     var outputURL: URL? {
         guard let outputPath, !outputPath.isEmpty else { return nil }
+        return Self.url(forStoredPath: outputPath)
+    }
+
+    /// Every file the download produced (see `outputPaths`), each found the way `outputURL` is.
+    /// Entries that recorded only one file give just that one.
+    var outputURLs: [URL] {
+        guard let outputPaths, !outputPaths.isEmpty else {
+            return outputURL.map { [$0] } ?? []
+        }
+        return outputPaths.filter { !$0.isEmpty }.map(Self.url(forStoredPath:))
+    }
+
+    private static func url(forStoredPath path: String) -> URL {
         #if os(iOS)
         // iOS moves the app's container whenever the app is updated or reinstalled, so an
         // absolute path stored by an earlier install is stale even though the file is still there.
         if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            return Self.resolve(storedPath: outputPath, documentsDirectory: documents)
+            return resolve(storedPath: path, documentsDirectory: documents)
         }
         #endif
-        return URL(fileURLWithPath: outputPath)
+        return URL(fileURLWithPath: path)
     }
 
     /// Finds a file recorded under some earlier container's `Documents` folder.
