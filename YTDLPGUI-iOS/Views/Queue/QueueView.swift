@@ -20,6 +20,7 @@ struct QueueView: View {
                     list
                 }
             }
+            .mobileScreen()
             .navigationTitle("Queue")
             .modifier(QueueSubtitle(queue: queue))
             .toolbar { toolbarContent }
@@ -47,6 +48,11 @@ struct QueueView: View {
 
     private var list: some View {
         List {
+            ScreenIntroduction(
+                eyebrow: "YOUR QUEUE", title: "Coming right up.",
+                detail: "\(queue.activeCount) downloading · \(queue.queuedCount) waiting · \(queue.finishedItems.count) finished",
+                symbol: "arrow.down.circle"
+            )
             if !queue.activeItems.isEmpty {
                 Section {
                     rows(queue.activeItems)
@@ -84,6 +90,7 @@ struct QueueView: View {
             NavigationLink(value: item.id) {
                 QueueRowView(item: item)
             }
+            .mobileCardRow()
             .modifier(QueueItemSwipeActions(item: item))
             .contextMenu {
                 QueueItemMenuItems(
@@ -96,15 +103,12 @@ struct QueueView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Downloads", systemImage: "tray")
-        } description: {
-            Text("Paste a link on the Download tab.")
-        } actions: {
-            Button("Go to Download") {
-                model.selectedTab = .download
-            }
-            .buttonStyle(.borderedProminent)
+        LibraryEmptyState(
+            title: "Ready when you are.",
+            detail: "Your downloads will appear here. Add a link to start building your offline collection.",
+            symbol: "arrow.down.to.line"
+        ) {
+            model.selectedTab = .download
         }
     }
 

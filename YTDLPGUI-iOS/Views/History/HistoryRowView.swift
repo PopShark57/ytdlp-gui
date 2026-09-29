@@ -7,8 +7,8 @@ struct HistoryRowView: View {
     var isFileMissing = false
 
     var body: some View {
-        ThumbnailRowLayout(thumbnailWidth: 80) {
-            ThumbnailView(url: entry.thumbnailURL, placeholderSymbol: entry.kind.symbolName, cornerRadius: 6)
+        ThumbnailRowLayout(thumbnailWidth: 96) {
+            ThumbnailView(url: entry.thumbnailURL, placeholderSymbol: entry.kind.symbolName, cornerRadius: 12)
                 .opacity(entry.succeeded ? 1 : 0.6)
         } content: {
             VStack(alignment: .leading, spacing: 3) {
@@ -33,7 +33,7 @@ struct HistoryRowView: View {
                 }
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 10)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(entry.title)
         .accessibilityValue(entry.accessibilityStatus(isFileMissing: isFileMissing))

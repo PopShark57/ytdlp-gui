@@ -26,6 +26,7 @@ struct RootView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        .tint(MobileTheme.accent)
         .overlay(alignment: .top) {
             StatusToastHost(message: model.status.message) {
                 model.status.dismiss()

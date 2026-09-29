@@ -6,6 +6,7 @@ import SwiftUI
 /// replayed download whose unsafe options were removed), so it lives above the tabs rather than
 /// on the Download screen, where it would go unseen.
 struct StatusToastHost: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var message: String?
     var onDismiss: () -> Void
 
@@ -19,7 +20,7 @@ struct StatusToastHost: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
-        .animation(.spring(duration: 0.35), value: message)
+        .animation(reduceMotion ? nil : .spring(duration: 0.35), value: message)
     }
 }
 
@@ -60,8 +61,11 @@ struct StatusToast: View {
 
 /// Liquid Glass where the system has it, a material capsule before that.
 private struct ToastBackground: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if reduceTransparency {
+            content.background(MobileTheme.surface, in: .capsule)
+        } else if #available(iOS 26.0, *) {
             content
                 .glassEffect(.regular, in: .capsule)
         } else {

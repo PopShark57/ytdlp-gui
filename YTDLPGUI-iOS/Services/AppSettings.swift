@@ -69,7 +69,7 @@ final class AppSettings {
         static let keepScreenAwake = true
         static let showCommandPreview = false
         static let confirmBeforeClearingHistory = true
-        static let appearance = AppearanceMode.system
+        static let appearance = AppearanceMode.dark
     }
 
     private let defaults: UserDefaults

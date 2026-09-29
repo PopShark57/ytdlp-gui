@@ -123,21 +123,28 @@ private struct QueueItemInfoList: View {
             Section {
                 header
             }
+            .mobileCardRow()
 
             if item.state == .active {
                 progressSection
+                    .listRowBackground(MobileTheme.surface)
             }
             if item.state == .completed {
                 fileSection(existingFiles: existingFiles)
+                    .listRowBackground(MobileTheme.surface)
             }
             if let failure = item.failure, item.state == .failed || item.state == .cancelled {
                 failureSection(failure)
+                    .listRowBackground(MobileTheme.surface)
             }
             if !existingFiles.isEmpty, model.queue.canSaveToPhotos(item) {
                 photosSection
+                    .listRowBackground(MobileTheme.surface)
             }
             actionsSection(existingFiles: existingFiles)
+                .listRowBackground(MobileTheme.surface)
             sourceSection
+                .listRowBackground(MobileTheme.surface)
         }
         .readableContentWidth()
     }

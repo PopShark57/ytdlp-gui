@@ -15,15 +15,25 @@ struct AdvancedOptionsView: View {
 
         Form {
             filenameSection(composer)
+                .listRowBackground(MobileTheme.surface)
             subtitlesSection(composer)
+                .listRowBackground(MobileTheme.surface)
             metadataSection(composer)
+                .listRowBackground(MobileTheme.surface)
             sponsorBlockSection(composer)
+                .listRowBackground(MobileTheme.surface)
             playlistSection(composer)
+                .listRowBackground(MobileTheme.surface)
             archiveSection(composer)
+                .listRowBackground(MobileTheme.surface)
             networkSection(composer)
+                .listRowBackground(MobileTheme.surface)
             cookiesSection
+                .listRowBackground(MobileTheme.surface)
             customArgumentsSection(composer)
+                .listRowBackground(MobileTheme.surface)
             resetSection
+                .listRowBackground(MobileTheme.surface)
         }
         .readableContentWidth()
         .scrollDismissesKeyboard(.interactively)

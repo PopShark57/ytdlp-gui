@@ -32,6 +32,7 @@ struct HistoryView: View {
                     list
                 }
             }
+            .mobileScreen()
             .navigationTitle("History")
             .searchable(text: $searchText, prompt: "Titles, links and file names")
             .toolbar { toolbarContent }
@@ -66,10 +67,16 @@ struct HistoryView: View {
 
     private var list: some View {
         List {
+            ScreenIntroduction(
+                eyebrow: "YOUR COLLECTION", title: "Saved for later.",
+                detail: "\(filteredEntries.count.formatted()) downloads · \(filter.title)",
+                symbol: "square.stack"
+            )
             ForEach(filteredEntries) { entry in
                 NavigationLink(value: entry.id) {
                     HistoryRowView(entry: entry, isFileMissing: history.isFileMissing(entry))
                 }
+                .mobileCardRow()
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
                         history.remove(entry)
@@ -91,15 +98,12 @@ struct HistoryView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No History", systemImage: "clock.arrow.circlepath")
-        } description: {
-            Text("Everything you download is listed here, so you can find the file again or download it a second time.")
-        } actions: {
-            Button("Go to Download") {
-                model.selectedTab = .download
-            }
-            .buttonStyle(.borderedProminent)
+        LibraryEmptyState(
+            title: "Keep the good stuff.",
+            detail: "Find your saved media, open a file or download a favourite again.",
+            symbol: "clock.arrow.circlepath"
+        ) {
+            model.selectedTab = .download
         }
     }
 

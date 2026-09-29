@@ -10,14 +10,26 @@ struct SettingsView: View {
 
         NavigationStack {
             Form {
+                ScreenIntroduction(
+                    eyebrow: "SETTINGS", title: "Set it your way.",
+                    detail: "Your downloads. Your preferences.", symbol: "slider.horizontal.3"
+                )
                 downloadsSection(settings)
+                    .listRowBackground(MobileTheme.surface)
                 StorageSettingsSection()
+                    .listRowBackground(MobileTheme.surface)
                 EngineSettingsSection()
+                    .listRowBackground(MobileTheme.surface)
                 CookieSettingsSection()
+                    .listRowBackground(MobileTheme.surface)
                 appearanceSection(settings)
+                    .listRowBackground(MobileTheme.surface)
                 historySection(settings)
+                    .listRowBackground(MobileTheme.surface)
                 AboutSection()
+                    .listRowBackground(MobileTheme.surface)
                 resetSection
+                    .listRowBackground(MobileTheme.surface)
             }
             .readableContentWidth()
             .navigationTitle("Settings")

@@ -56,6 +56,7 @@ struct HistoryDetailView: View {
             Section {
                 header(for: entry)
             }
+            .listRowBackground(MobileTheme.surface)
 
             if !entry.succeeded {
                 Section("Problem") {
@@ -75,6 +76,7 @@ struct HistoryDetailView: View {
                             .foregroundStyle(.red)
                     }
                 }
+                .listRowBackground(MobileTheme.surface)
             }
 
             Section("Details") {
@@ -104,6 +106,7 @@ struct HistoryDetailView: View {
                         .textSelection(.enabled)
                 }
             }
+            .listRowBackground(MobileTheme.surface)
 
             if files.count > 1 {
                 Section("Files (\(files.count))") {
@@ -111,6 +114,7 @@ struct HistoryDetailView: View {
                         FileNameRow(url: file, isMissing: status != nil && !existingFiles.contains(file))
                     }
                 }
+                .listRowBackground(MobileTheme.surface)
             }
 
             Section {
@@ -125,6 +129,7 @@ struct HistoryDetailView: View {
                     }
                 )
             }
+            .listRowBackground(MobileTheme.surface)
         }
         .readableContentWidth()
     }
