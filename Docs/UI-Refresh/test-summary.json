@@ -1,0 +1,42 @@
+{
+  "devicesAndConfigurations": [
+    {
+      "device": {
+        "architecture": "arm64",
+        "deviceName": "Physical iPhone",
+        "modelName": "iPhone 16 Pro Max",
+        "osBuildNumber": "24B5089g",
+        "osVersion": "27.2",
+        "platform": "iOS"
+      },
+      "expectedFailures": 0,
+      "failedTests": 0,
+      "passedTests": 28,
+      "skippedTests": 0,
+      "testPlanConfiguration": {
+        "configurationId": "1",
+        "configurationName": "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription": "YTDLPGUI-iOS \u00b7 Built with macOS 27.2",
+  "expectedFailures": 0,
+  "failedTests": 0,
+  "finishTime": 1790701030.612,
+  "passedTests": 28,
+  "result": "Passed",
+  "runtimeWarnings": [],
+  "skippedTests": 0,
+  "startTime": 1790700958.737,
+  "statistics": [],
+  "testFailures": [],
+  "title": "Test - YTDLPGUI-iOS",
+  "topInsights": [
+    {
+      "category": "Longest Test Runs",
+      "impact": "11% of duration",
+      "text": "1 longest test run with outlier durations exceeding 0.10s (three standard deviations)"
+    }
+  ],
+  "totalTestCount": 28
+}

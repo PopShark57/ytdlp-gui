@@ -5,6 +5,7 @@ extension View {
     /// grouped background still fills the screen edge to edge.
     func readableContentWidth(_ maximumWidth: CGFloat = 720) -> some View {
         modifier(ReadableContentMargins(maximumWidth: maximumWidth))
+            .mobileScreen()
     }
 
     /// Pins a bar to the bottom of a scrolling screen, above the tab bar and the keyboard.

@@ -13,52 +13,70 @@ struct LinkSection: View {
         @Bindable var composer = model.composer
 
         Section {
-            if model.clipboardHasSuggestedLink {
-                ClipboardSuggestionRow()
-            }
-
-            if !model.engine.isReady {
-                Label {
-                    Text("Preparing the download engine…")
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    Label("Add a link", systemImage: "link")
+                        .font(.headline)
+                    Spacer()
+                    Text("01")
+                        .font(.caption.monospaced().weight(.semibold))
                         .foregroundStyle(.secondary)
-                } icon: {
-                    ProgressView()
                 }
-                .accessibilityElement(children: .combine)
-            }
 
-            TextField("Paste or type a link", text: $composer.urlText, axis: .vertical)
-                .lineLimit(1...4)
-                .keyboardType(.URL)
-                .textContentType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.go)
-                .focused(isFieldFocused)
-                .onSubmit(submit)
-                .onChange(of: composer.urlText) { oldValue, newValue in
-                    handleReturnKey(from: oldValue, to: newValue)
+                if model.clipboardHasSuggestedLink {
+                    ClipboardSuggestionRow()
                 }
-                .accessibilityLabel("Link")
-                .accessibilityHint("The web address of the video or audio to download. Several links, one per line, are downloaded one after another.")
 
-            actionRow
+                if !model.engine.isReady {
+                    Label {
+                        Text("Preparing the download engine…")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    } icon: {
+                        ProgressView()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
 
-            if composer.isMultipleURLs {
-                Label(
-                    "\(composer.detectedURLs.count) links — each is downloaded with the options below",
-                    systemImage: "list.bullet"
-                )
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            } else if showsInvalidLinkHint {
-                WarningRow(message: "That doesn't look like a web address. It should start with http:// or https://.")
+                TextField("Paste or type a link", text: $composer.urlText, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(2...4)
+                    .padding(16)
+                    .background(MobileTheme.canvas, in: .rect(cornerRadius: 16))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(MobileTheme.accent.opacity(isFieldFocused.wrappedValue ? 0.8 : 0.18))
+                    }
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.go)
+                    .focused(isFieldFocused)
+                    .onSubmit(submit)
+                    .onChange(of: composer.urlText) { oldValue, newValue in
+                        handleReturnKey(from: oldValue, to: newValue)
+                    }
+                    .accessibilityLabel("Link")
+                    .accessibilityHint("The web address of the video or audio to download. Several links, one per line, are downloaded one after another.")
+
+                actionRow
+
+                if composer.isMultipleURLs {
+                    Label(
+                        "\(composer.detectedURLs.count) links — each uses the options below",
+                        systemImage: "list.bullet"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                } else if showsInvalidLinkHint {
+                    WarningRow(message: "That doesn't look like a web address. It should start with http:// or https://.")
+                }
             }
-        } header: {
-            Text("Link")
+            .padding(.vertical, 8)
         } footer: {
-            Text("Paste one link, or several at once. You can also drop links onto this screen.")
+            Text("One link or a whole playlist. Paste several links to queue them together.")
         }
+        .mobileCardRow()
     }
 
     // MARK: - Actions
@@ -82,16 +100,19 @@ struct LinkSection: View {
             Button {
                 composer.clear()
             } label: {
-                Label("Clear", systemImage: "xmark")
+                Image(systemName: "xmark")
+                    .frame(minWidth: 24, minHeight: 24)
             }
-            .buttonStyle(.bordered)
+            .mobileGlassButton()
             .buttonBorderShape(.capsule)
             .disabled(composer.urlText.isEmpty)
             .accessibilityLabel("Clear link")
 
             analyzeButton
         }
+        .controlSize(.regular)
         .padding(.vertical, 2)
+        .mobileGlassGroup()
     }
 
     @ViewBuilder
@@ -106,14 +127,14 @@ struct LinkSection: View {
                     Text("Cancel")
                 }
             }
-            .buttonStyle(.bordered)
+            .mobileGlassButton()
             .buttonBorderShape(.capsule)
             .accessibilityLabel("Analyzing. Cancel")
         } else {
             Button(action: submit) {
                 Label("Analyze", systemImage: "sparkle.magnifyingglass")
             }
-            .buttonStyle(.bordered)
+            .mobileGlassButton()
             .buttonBorderShape(.capsule)
             .disabled(!canAnalyze)
             .accessibilityHint("Fetches the title, artwork and available formats")

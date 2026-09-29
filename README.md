@@ -212,6 +212,12 @@ and no ffmpeg, so the app carries its own engine:
 [`Docs/iOS-Architecture.md`](Docs/iOS-Architecture.md) is the full design, including the JSON
 protocol between Swift and Python.
 
+The iOS interface defaults to a dark ink palette with blue accents, rounded media cards and
+native Liquid Glass controls on iOS 26 and later, including the refined iOS 27 appearance.
+**Settings › Appearance** still offers Light and System, and existing explicit choices are
+preserved. Large accessibility text stacks the format choices vertically; Reduce Transparency
+uses solid control fallbacks. iOS 18 continues to use standard bordered controls.
+
 ### How it differs from the Mac app
 
 | | macOS | iPhone and iPad |

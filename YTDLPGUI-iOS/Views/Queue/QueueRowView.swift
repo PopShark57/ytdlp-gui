@@ -5,8 +5,8 @@ struct QueueRowView: View {
     let item: DownloadItem
 
     var body: some View {
-        ThumbnailRowLayout(thumbnailWidth: 88) {
-            ThumbnailView(url: item.thumbnailURL, placeholderSymbol: item.options.kind.symbolName, cornerRadius: 6)
+        ThumbnailRowLayout(thumbnailWidth: 96) {
+            ThumbnailView(url: item.thumbnailURL, placeholderSymbol: item.options.kind.symbolName, cornerRadius: 12)
         } content: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.displayTitle)
@@ -31,7 +31,7 @@ struct QueueRowView: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 10)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.displayTitle)
         .accessibilityValue(item.accessibilityStatus)

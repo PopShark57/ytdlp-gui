@@ -32,7 +32,7 @@ struct AppSettingsTests {
         #expect(settings.keepScreenAwake)
         #expect(!settings.showCommandPreview)
         #expect(settings.confirmBeforeClearingHistory)
-        #expect(settings.appearance == .system)
+        #expect(settings.appearance == .dark)
         #expect(settings.storedOptions == DownloadOptions())
     }
 
@@ -48,7 +48,7 @@ struct AppSettingsTests {
         settings.keepScreenAwake = false
         settings.showCommandPreview = true
         settings.confirmBeforeClearingHistory = false
-        settings.appearance = .dark
+        settings.appearance = .light
 
         let relaunched = AppSettings(defaults: suite.defaults)
         #expect(!relaunched.autoAnalyzePastedURLs)
@@ -59,8 +59,8 @@ struct AppSettingsTests {
         #expect(!relaunched.keepScreenAwake)
         #expect(relaunched.showCommandPreview)
         #expect(!relaunched.confirmBeforeClearingHistory)
-        #expect(relaunched.appearance == .dark)
-        #expect(relaunched.appearance.colorScheme == .dark)
+        #expect(relaunched.appearance == .light)
+        #expect(relaunched.appearance.colorScheme == .light)
     }
 
     @Test("Simultaneous downloads stay within 1...4, however they are set")
@@ -137,7 +137,7 @@ struct AppSettingsTests {
 
         settings.resetToDefaults()
         #expect(settings.maximumConcurrentDownloads == 2)
-        #expect(settings.appearance == .system)
+        #expect(settings.appearance == .dark)
         #expect(settings.keepScreenAwake)
         #expect(settings.storedOptions == DownloadOptions())
 
