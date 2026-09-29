@@ -224,7 +224,7 @@ final class AppModel {
             return
         }
         if let kind = request.kind {
-            composer.options.kind = kind
+            composer.loadKind(kind)
         }
         hasClipboardSuggestion = false
         composer.setURLText(request.urls.joined(separator: "\n"), analyzeIfEnabled: true)
@@ -383,7 +383,7 @@ final class AppModel {
                 status.show(notes.joined(separator: " "))
             }
         } else {
-            composer.options.kind = entry.kind
+            composer.loadKind(entry.kind)
         }
         hasClipboardSuggestion = false
         composer.setURLText(entry.sourceURL, analyzeIfEnabled: true)

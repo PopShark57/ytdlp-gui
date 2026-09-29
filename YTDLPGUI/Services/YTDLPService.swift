@@ -7,6 +7,8 @@ import Foundation
 struct YTDLPService: Sendable {
     let executableURL: URL
     let ffmpegURL: URL?
+    /// The app's yt-dlp plugin folder, when this yt-dlp can load it (see `YTDLPPlugins`).
+    var pluginDirectory: URL? = nil
 
     // MARK: - Metadata
 
@@ -78,7 +80,8 @@ struct YTDLPService: Sendable {
             arguments: ArgumentBuilder.downloadArguments(
                 url: url,
                 options: options,
-                ffmpegURL: ffmpegURL
+                ffmpegURL: ffmpegURL,
+                pluginDirectory: pluginDirectory
             ),
             // Running in the destination keeps any relative path yt-dlp reports resolvable.
             currentDirectoryURL: options.outputDirectory
@@ -90,7 +93,9 @@ struct YTDLPService: Sendable {
     func previewCommand(url: String, options: DownloadOptions) -> String {
         ShellQuoting.commandLine(
             executable: executableURL.path(percentEncoded: false),
-            arguments: ArgumentBuilder.downloadArguments(url: url, options: options, ffmpegURL: ffmpegURL)
+            arguments: ArgumentBuilder.downloadArguments(
+                url: url, options: options, ffmpegURL: ffmpegURL, pluginDirectory: pluginDirectory
+            )
         )
     }
 

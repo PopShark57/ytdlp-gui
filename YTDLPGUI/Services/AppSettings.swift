@@ -129,7 +129,7 @@ final class AppSettings {
 
     // MARK: Last used options
 
-    /// The options the user last downloaded with, restored at launch.
+    /// The Download screen's options as last set, restored at launch.
     private(set) var storedOptions: DownloadOptions
 
     init(defaults: UserDefaults = .standard) {
@@ -163,7 +163,7 @@ final class AppSettings {
         storedOptions = restored
     }
 
-    /// Remembers the options used for the most recent download.
+    /// Remembers the options chosen on the Download screen, as they change.
     func rememberOptions(_ options: DownloadOptions) {
         storedOptions = options
         if let data = try? JSONEncoder().encode(options) {

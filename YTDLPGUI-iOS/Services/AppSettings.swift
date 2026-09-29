@@ -128,7 +128,7 @@ final class AppSettings {
 
     // MARK: Last used options
 
-    /// The options the user last downloaded with, restored at launch.
+    /// The Download screen's options as last set, restored at launch.
     private(set) var storedOptions: DownloadOptions
 
     init(defaults: UserDefaults = .standard) {
@@ -172,8 +172,8 @@ final class AppSettings {
         storedOptions = DownloadOptionsResolver.editable(restored)
     }
 
-    /// Remembers the options chosen on the Download screen, which the Share sheet and Shortcuts
-    /// then use too.
+    /// Remembers the options chosen on the Download screen, as they change, which the Share sheet
+    /// and Shortcuts then use too.
     ///
     /// Only the person's choices are kept: no paths, which the app fills in afresh for every
     /// download, and no passwords or other credentials, because `UserDefaults` is included in

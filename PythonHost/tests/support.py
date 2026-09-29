@@ -354,6 +354,7 @@ def fixture(name):
         'audio.m4a': [*audio, '-t', '3', '-c:a', 'aac', '-vn'],
         'audio.webm': [*audio, '-t', '3', '-c:a', 'libopus', '-vn'],
         'thumbnail.jpg': ['-f', 'lavfi', '-i', 'color=c=red:s=64x64', '-frames:v', '1'],
+        'animation.gif': [*video, '-t', '1'],
     }
     if name == 'thumbnail.webp':
         with open(path, 'wb') as file:

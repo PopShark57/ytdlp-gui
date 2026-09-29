@@ -35,7 +35,11 @@ final class Toolchain {
     /// A service bound to the currently detected executables, or `nil` when yt-dlp is missing.
     var service: YTDLPService? {
         guard let executableURL = ytdlp.executableURL else { return nil }
-        return YTDLPService(executableURL: executableURL, ffmpegURL: ffmpeg.executableURL)
+        return YTDLPService(
+            executableURL: executableURL,
+            ffmpegURL: ffmpeg.executableURL,
+            pluginDirectory: YTDLPPlugins.isSupported(version: ytdlp.version) ? YTDLPPlugins.directory : nil
+        )
     }
 
     // MARK: - Detection

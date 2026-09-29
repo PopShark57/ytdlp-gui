@@ -46,6 +46,9 @@ def media_routes():
         '/audio.webm': (support.read(support.fixture('audio.webm')), 'audio/webm'),
         '/thumbnail.jpg': (support.read(support.fixture('thumbnail.jpg')), 'image/jpeg'),
         '/thumbnail.webp': (support.read(support.fixture('thumbnail.webp')), 'image/webp'),
+        '/animation.gif': (support.read(support.fixture('animation.gif')), 'image/gif'),
+        # Like Reddit's previews of a GIF post: named .gif, but a still picture.
+        '/preview.gif': (support.read(support.fixture('thumbnail.jpg')), 'image/jpeg'),
         '/manifest.mpd': (MPD.format(audio='audio.m4a', audio_type='audio/mp4', audio_codec='mp4a.40.2').encode(),
                           'application/dash+xml'),
         '/webm-audio.mpd': (MPD.format(audio='audio.webm', audio_type='audio/webm', audio_codec='opus').encode(),
@@ -364,6 +367,29 @@ class TaggingTests(DownloadTestCase):
         self.assertEqual(APP.requests(job_id, 'media.embed'), [])
         self.assertTrue(any("can't be embedded in a .webm file" in line for line in APP.log(job_id)))
         self.assertEqual(self.outputs('Sample*'), ['Sample.webm'])
+
+    def gif_info(self):
+        return self.info_json(ext='gif', url=self.server.url('/animation.gif'), vcodec='gif', acodec='none',
+                              thumbnails=[{'url': self.server.url('/preview.gif?format=png8&s=abc'), 'id': '0'}])
+
+    def test_a_gif_is_not_replaced_or_deleted_by_its_thumbnail(self):
+        # The thumbnail would be named Sample.gif too: yt-dlp would take it for the download
+        # already being there, then delete it as a thumbnail nobody asked to keep.
+        job_id, result = self.download(['--load-info-json', self.gif_info(), '--embed-thumbnail'])
+        self.assertSucceeded(job_id, result)
+        final = os.path.join(self.output, 'Sample.gif')
+        self.assertEqual(result['files'], [final])
+        self.assertEqual(self.outputs('Sample*'), ['Sample.gif'])
+        self.assertEqual(support.read(final), support.read(support.fixture('animation.gif')))
+
+    def test_a_gif_keeps_its_thumbnail_under_another_name(self):
+        job_id, result = self.download(['--load-info-json', self.gif_info(), '--write-thumbnail'])
+        self.assertSucceeded(job_id, result)
+        self.assertEqual(self.outputs('Sample*'), ['Sample.gif', 'Sample.thumbnail.gif'])
+        self.assertEqual(support.read(os.path.join(self.output, 'Sample.gif')),
+                         support.read(support.fixture('animation.gif')))
+        self.assertEqual(support.read(os.path.join(self.output, 'Sample.thumbnail.gif')),
+                         support.read(support.fixture('thumbnail.jpg')))
 
 
 @support.requires_ffmpeg

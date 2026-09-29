@@ -78,7 +78,6 @@ final class DownloadQueue {
             playlistCount: info?.playlistCount
         )
         items.append(item)
-        settings.rememberOptions(options)
         startEligibleItems()
         return item
     }

@@ -103,7 +103,7 @@ def download(payload):
         def work():
             ydl = _youtube_dl(params, job)
             with ydl:
-                ydl.add_reporters()
+                ydl.add_host_post_processors()
                 try:
                     if info_file is not None:
                         return ydl.download_with_info_file(expand_path(info_file))

@@ -3,8 +3,9 @@ import SwiftUI
 /// The less common yt-dlp features.
 ///
 /// Everything here starts at its default: the everyday flow is paste, choose, download, and none
-/// of this should get in its way. The row that opens this screen shows how many options differ
-/// from their defaults, so an unexpected one is easy to find again.
+/// of this should get in its way. A change is kept, across launches too, until it is changed back
+/// or reset. The row that opens this screen shows how many options differ from their defaults,
+/// so an unexpected one is easy to find again.
 struct AdvancedOptionsView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmsReset = false

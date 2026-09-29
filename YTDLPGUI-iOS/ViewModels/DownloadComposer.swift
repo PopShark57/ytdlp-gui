@@ -37,10 +37,19 @@ final class DownloadComposer {
         }
     }
 
-    var options: DownloadOptions
+    /// Saved as they change, so a choice made here or in Advanced Options survives the app being
+    /// ended, and the Share sheet and Shortcuts use it too.
+    var options: DownloadOptions {
+        didSet {
+            if savesOptionChanges { settings.rememberOptions(options) }
+        }
+    }
     private(set) var analysis: AnalysisState = .idle
     /// Output from the most recent analysis, for "Show Details" on a failure.
     private(set) var analysisLog: [String] = []
+
+    /// Off while options are loaded for one download, e.g. from a history entry.
+    @ObservationIgnored private var savesOptionChanges = true
 
     @ObservationIgnored private var analyzedURL: String?
     @ObservationIgnored private var analysisJobID: UUID?
@@ -199,10 +208,25 @@ final class DownloadComposer {
 
     /// Replaces the options, e.g. with those of a history entry. Paths and anything the embedded
     /// engine refuses are dropped; the app fills in its own when downloading.
+    ///
+    /// Not saved: they replace the person's own options only once one is changed or they are
+    /// downloaded with.
     func loadOptions(_ options: DownloadOptions) {
         var editable = DownloadOptionsResolver.editable(options, downloadsDirectory: self.options.outputDirectory)
         editable.customArguments = DownloadOptionsResolver.sanitizedCustomArguments(options.customArguments).arguments
-        self.options = editable
+        withoutSaving { self.options = editable }
+    }
+
+    /// Chooses video or audio for a link from elsewhere, such as a `ytdlpgui://` link, which any
+    /// web page can open. Like `loadOptions`, not saved by itself.
+    func loadKind(_ kind: DownloadKind) {
+        withoutSaving { options.kind = kind }
+    }
+
+    private func withoutSaving(_ change: () -> Void) {
+        savesOptionChanges = false
+        change()
+        savesOptionChanges = true
     }
 
     /// Called once the engine has started, so a link pasted while it was starting still gets
@@ -369,8 +393,7 @@ final class DownloadComposer {
             }
         }
 
-        // The Download screen is where options are chosen, so this is the one place that
-        // remembers them for next time (and for the Share sheet and Shortcuts).
+        // Usually saved already; not when they were loaded from elsewhere and left as they were.
         settings.rememberOptions(options)
         clearURLAfterQueueing()
         return true

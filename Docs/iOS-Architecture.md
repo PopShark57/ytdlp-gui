@@ -188,8 +188,12 @@ All of it goes through yt-dlp's own extension points, not by editing its source:
   it into parameters with `yt_dlp.parse_options(argv)`, exactly as the command-line tool would.
   The command preview therefore shows the real arguments. The host then adds the engine
   plumbing the preview does not show: `logger`, `progress_hooks`, `postprocessor_hooks`,
-  `noprogress`, `no_color`, `cachedir`, `js_runtimes={"jsc": {}}`, and its two reporting
-  post-processors (`pre_process` → `item`, `after_move` → `file`).
+  `noprogress`, `no_color`, `cachedir`, `js_runtimes={"jsc": {}}`, its two reporting
+  post-processors (`pre_process` → `item`, `after_move` → `file`), and `ThumbnailNamingPP` at
+  `video`, which renames a thumbnail that would share the video's file name (a GIF whose preview
+  is also `.gif`, as on Reddit) to `<name>.thumbnail.<ext>`. Otherwise yt-dlp writes the
+  thumbnail first, skips the real download as "already downloaded", and `--embed-thumbnail`
+  then deletes the file.
 - **Safety.** After parsing, the host refuses anything that would run a program, load
   configuration or plugins, or replace yt-dlp: `Exec` post-processors, external downloaders,
   `netrc_cmd`, `--update`, browser cookies. (Swift's `CustomArgumentPolicy` already strips these

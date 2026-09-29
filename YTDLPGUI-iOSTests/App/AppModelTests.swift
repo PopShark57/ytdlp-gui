@@ -20,6 +20,8 @@ struct AppModelTests {
         #expect(model.composer.urlText == "https://example.com/song")
         #expect(model.composer.options.kind == .audio)
         #expect(model.queue.items.isEmpty)
+        // Any web page can open such a link, so it doesn't change the remembered choice.
+        #expect(env.settings.storedOptions.kind == .video)
 
         model.handleOpenURL(try #require(URL(string: "ytdlpgui://download?url=javascript%3Aalert(1)")))
         #expect(model.composer.urlText == "https://example.com/song")
@@ -245,8 +247,14 @@ struct AppModelTests {
         #expect(model.status.message?.contains("‘--exec’") == true)
         #expect(model.status.message?.contains("‘--update’") == true)
         #expect(model.queue.items.isEmpty)
-        // "Edit Options and Download" never becomes the remembered options by itself.
+        // "Edit Options and Download" never becomes the remembered options by itself...
         #expect(env.settings.storedOptions.customArguments.isEmpty)
+        #expect(env.settings.storedOptions.subtitleMode == .off)
+
+        // ...but does once the person changes one.
+        model.composer.options.embedChapters.toggle()
+        #expect(env.settings.storedOptions.subtitleMode == .both)
+        #expect(env.settings.storedOptions.customArguments == "--no-mtime")
     }
 
     @Test("An older history entry without saved options loads with its own kind")
