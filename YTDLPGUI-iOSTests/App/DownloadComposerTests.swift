@@ -326,6 +326,33 @@ struct DownloadComposerTests {
         #expect(composer.options.audioQuality == .kbps128)
     }
 
+    @Test("Options are saved as they change, and come back at the next launch without a download")
+    func optionsPersistAsTheyChange() async throws {
+        let env = try await readyEnvironment()
+        let composer = env.composer
+        composer.options.kind = .audio
+        composer.options.outputTemplate = "%(uploader)s - %(title)s.%(ext)s"
+        composer.options.embedThumbnail = true
+        composer.options.sponsorBlockCategories = [.sponsor, .intro]
+        composer.options.proxy = "http://user:s3cret@proxy.test:3128"
+        #expect(env.queue.items.isEmpty)
+
+        let relaunched = AppSettings(defaults: env.defaults).storedOptions
+        #expect(relaunched.kind == .audio)
+        #expect(relaunched.outputTemplate == "%(uploader)s - %(title)s.%(ext)s")
+        #expect(relaunched.embedThumbnail)
+        #expect(relaunched.sponsorBlockCategories == [.sponsor, .intro])
+        // Credentials stay for this launch only.
+        #expect(relaunched.proxy == "http://proxy.test:3128")
+        #expect(composer.options.proxy == "http://user:s3cret@proxy.test:3128")
+
+        composer.resetAdvancedOptions()
+        let afterReset = AppSettings(defaults: env.defaults).storedOptions
+        #expect(afterReset.kind == .audio)
+        #expect(afterReset.outputTemplate == DownloadOptions.defaultOutputTemplate)
+        #expect(!afterReset.embedThumbnail)
+    }
+
     @Test("Stored options start without paths from an earlier install")
     func storedOptionsAreCleaned() throws {
         let env = try AppTestEnvironment()

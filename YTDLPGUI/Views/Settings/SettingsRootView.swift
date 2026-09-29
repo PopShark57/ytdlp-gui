@@ -98,7 +98,9 @@ struct GeneralSettingsView: View {
             Section {
                 Button("Reset All Settings…") {
                     model.settings.resetToDefaults()
-                    model.composer.options.outputDirectory = model.settings.downloadDirectory
+                    // The Download screen saves its options as they change, so they are reset
+                    // with the rest rather than written straight back.
+                    model.composer.options = model.settings.storedOptions
                 }
             }
         }

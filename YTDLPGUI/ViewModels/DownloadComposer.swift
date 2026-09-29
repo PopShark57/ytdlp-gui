@@ -30,7 +30,10 @@ final class DownloadComposer {
         }
     }
 
-    var options: DownloadOptions
+    /// Saved as they change, so a choice made here or in Advanced Options survives a relaunch.
+    var options: DownloadOptions {
+        didSet { settings.rememberOptions(options) }
+    }
     private(set) var analysis: AnalysisState = .idle
     /// Shown as a transient banner, e.g. after adding several URLs at once.
     private(set) var statusMessage: String?
@@ -227,7 +230,6 @@ final class DownloadComposer {
             }
         }
 
-        settings.rememberOptions(options)
         clearURLAfterQueueing()
         return true
     }

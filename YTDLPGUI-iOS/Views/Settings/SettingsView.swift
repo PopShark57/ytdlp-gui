@@ -104,6 +104,9 @@ struct SettingsView: View {
             ) {
                 Button("Reset All Settings", role: .destructive) {
                     model.settings.resetToDefaults()
+                    // The Download screen's options too, which are otherwise saved again as
+                    // soon as one changes.
+                    model.composer.loadOptions(DownloadOptions())
                 }
             } message: {
                 Text("Your downloads, history and imported cookies are kept.")
