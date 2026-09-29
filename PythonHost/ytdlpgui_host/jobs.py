@@ -14,7 +14,7 @@ import time
 
 from yt_dlp import YoutubeDL
 from yt_dlp.postprocessor.common import PostProcessor
-from yt_dlp.utils import DownloadCancelled, float_or_none, int_or_none, str_or_none
+from yt_dlp.utils import DownloadCancelled, determine_ext, float_or_none, int_or_none, str_or_none
 
 from . import bridge
 from .errors import HostError
@@ -313,9 +313,10 @@ class EngineYoutubeDL(YoutubeDL):
         else:
             super().to_stdout(message, skip_eol, quiet)
 
-    def add_reporters(self):
-        """Adds the post-processors that send `item` and `file` events."""
+    def add_host_post_processors(self):
+        """Adds the post-processors that send `item` and `file` events, and ThumbnailNamingPP."""
         self.add_post_processor(ItemReporterPP(self.job), when='pre_process')
+        self.add_post_processor(ThumbnailNamingPP(), when='video')
         self.add_post_processor(FileReporterPP(self.job), when='after_move')
 
 
@@ -324,16 +325,51 @@ def job_of(downloader):
     return getattr(downloader, 'job', None)
 
 
-class _ReporterPP(PostProcessor):
+class _QuietPP(PostProcessor):
+    """A post-processor of the host's own, which the app doesn't show as a processing step."""
+
+    def _hook_progress(self, status, info_dict):
+        # Not a step the person asked for, so it stays out of the post-processing events.
+        pass
+
+
+class _ReporterPP(_QuietPP):
     """A post-processor that only tells the app what is happening."""
 
     def __init__(self, job):
         super().__init__()
         self._job = job
 
-    def _hook_progress(self, status, info_dict):
-        # Not a step the person asked for, so it stays out of the post-processing events.
-        pass
+
+class ThumbnailNamingPP(_QuietPP):
+    """Runs at `video`, just before yt-dlp names the files, and keeps thumbnails off the video's name.
+
+    yt-dlp names a thumbnail after the video with the thumbnail's own extension, so a GIF whose
+    preview URL also ends in ".gif" (as on Reddit GIF posts) gets a thumbnail with exactly the
+    video's name. The thumbnail is written first, so the download is then skipped as "already
+    downloaded", and --embed-thumbnail finally deletes that file as a thumbnail nobody asked
+    to keep: the download succeeds with nothing on disk. Such a thumbnail becomes
+    "<name>.thumbnail.<ext>" instead, as --write-all-thumbnails puts the ID in front of the
+    extension.
+
+    The Mac app does the same with a yt-dlp plugin, YTDLPGUI/Resources/ytdlpgui_thumbnail_naming.py;
+    keep the two in step.
+    """
+
+    def run(self, info):
+        thumbnails = info.get('thumbnails') or ()
+        write_all = self.get_param('write_all_thumbnails')
+        if not (write_all or self.get_param('writethumbnail')) or (write_all and len(thumbnails) > 1):
+            # None are written, or all are, as "<name>.<id>.<ext>".
+            return [], info
+        media_exts = {str(ext).lower() for ext in (info.get('ext'), self.get_param('final_ext')) if ext}
+        for thumbnail in thumbnails:
+            # The extension yt-dlp's _write_thumbnails will use. Compared without case because
+            # the iOS file system ignores it.
+            ext = thumbnail.get('ext') or determine_ext(thumbnail.get('url'), 'jpg')
+            if ext.lower() in media_exts:
+                thumbnail['ext'] = f'thumbnail.{ext}'
+        return [], info
 
 
 class ItemReporterPP(_ReporterPP):

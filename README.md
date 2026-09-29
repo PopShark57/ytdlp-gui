@@ -413,6 +413,14 @@ useful `PATH`, so the child process is given an explicit one covering the standa
 manager locations, plus `--ffmpeg-location` when ffmpeg's path is known. `PYTHONUNBUFFERED` and
 `PYTHONIOENCODING` are set so progress arrives line by line and non-ASCII titles survive.
 
+**One yt-dlp plugin of the app's own.** yt-dlp names a thumbnail after the video with the
+thumbnail's extension, so a GIF whose preview is also a `.gif` (Reddit's GIF posts) would be
+replaced by its own still preview. The app writes a small post-processor,
+`YTDLPGUI/Resources/ytdlpgui_thumbnail_naming.py`, to Application Support at launch and runs
+yt-dlp with `--plugin-dirs` and `--use-postprocessor YTDLPGUIThumbnailNaming:when=video`, which
+renames such a thumbnail to `<name>.thumbnail.<ext>`. It is only added for yt-dlp 2024.10.22 and
+later, the first with `--plugin-dirs`. The custom-arguments field still can't load plugins.
+
 **JSON is decoded leniently.** yt-dlp's output comes from over a thousand independent
 extractors, and field presence and even field *types* vary between them. Every value is read
 permissively and a missing or oddly-typed field never fails the whole decode.

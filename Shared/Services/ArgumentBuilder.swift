@@ -44,10 +44,13 @@ enum ArgumentBuilder {
     ///
     /// - Parameter ffmpegURL: Passed through as `--ffmpeg-location` when known. yt-dlp otherwise
     ///   looks for ffmpeg on `PATH`, which a Finder-launched app cannot be relied upon to have.
+    /// - Parameter pluginDirectory: The Mac app's yt-dlp plugin folder (see `YTDLPPlugins`), when
+    ///   this yt-dlp can load it.
     static func downloadArguments(
         url: String,
         options: DownloadOptions,
-        ffmpegURL: URL? = nil
+        ffmpegURL: URL? = nil,
+        pluginDirectory: URL? = nil
     ) -> [String] {
         var arguments: [String] = []
 
@@ -70,6 +73,7 @@ enum ArgumentBuilder {
         arguments += playlistArguments(for: options)
         arguments += subtitleArguments(for: options, allowsEmbedding: true)
         arguments += artworkAndMetadataArguments(for: options)
+        arguments += thumbnailNamingArguments(pluginDirectory: pluginDirectory, options: options)
         arguments += sponsorBlockArguments(for: options)
         arguments += archiveArguments(for: options)
 
@@ -230,6 +234,28 @@ enum ArgumentBuilder {
         if options.writeInfoJSON { arguments.append("--write-info-json") }
         return arguments
     }
+
+    /// Loads the Mac app's plugin that keeps a thumbnail off the video's file name. Without it, a
+    /// GIF whose preview is also a `.gif` (as on Reddit) is skipped as already downloaded once the
+    /// preview has been written under its name, and the still preview is all that's left.
+    ///
+    /// Added whether or not thumbnails are asked for, because the custom arguments can ask for
+    /// them too; the plugin does nothing when none are written.
+    static func thumbnailNamingArguments(pluginDirectory: URL?, options: DownloadOptions) -> [String] {
+        guard let pluginDirectory else { return [] }
+        // `--no-plugin-dirs` (or an abbreviation of it) would leave the post-processor undefined,
+        // and yt-dlp would refuse to start.
+        let custom = CustomArgumentPolicy.safeArguments(from: options.customArguments, context: .externalProcess)
+        guard !custom.contains(where: { $0.hasPrefix("--no-plu") }) else { return [] }
+        return [
+            "--plugin-dirs", pluginDirectory.path(percentEncoded: false),
+            "--use-postprocessor", "\(thumbnailNamingPostprocessor):when=video",
+        ]
+    }
+
+    /// The name `--use-postprocessor` knows the Mac app's plugin by: the class name in
+    /// `YTDLPGUI/Resources/ytdlpgui_thumbnail_naming.py` without "PP".
+    static let thumbnailNamingPostprocessor = "YTDLPGUIThumbnailNaming"
 
     /// Categories are sorted so the same choice always produces the same command.
     static func sponsorBlockArguments(for options: DownloadOptions) -> [String] {
