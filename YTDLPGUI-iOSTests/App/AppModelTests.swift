@@ -56,6 +56,63 @@ struct AppModelTests {
         #expect(model.queue.items.count == 2)
     }
 
+    @Test("Photos retries a failed transaction and rejects an overlapping save")
+    func atomicPhotoImport() async throws {
+        let env = try AppTestEnvironment()
+        let urls = try ["one.jpg", "two.jpg", "three.jpg"].map { try env.makeDownloadedFile(named: $0) }
+        var attempts: [[URL]] = []
+        var resume: CheckedContinuation<Void, Never>?
+        let library = MediaLibrary { files in
+            attempts.append(files)
+            if attempts.count == 1 {
+                await withCheckedContinuation { resume = $0 }
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
+        let first = Task { try await library.saveToPhotos(urls) }
+        try await waitUntil("Photos transaction") { resume != nil }
+        await #expect(throws: MediaLibrary.SaveError.self) { try await library.saveToPhotos(urls) }
+        resume?.resume()
+        await #expect(throws: CocoaError.self) { try await first.value }
+        #expect(try await library.saveToPhotos(urls) == 3)
+        #expect(attempts == [urls, urls])
+    }
+
+    @Test("A received draft can be appended and recovered without erasing the current URL")
+    func appendDraft() throws {
+        let env = try AppTestEnvironment()
+        env.settings.autoAnalyzePastedURLs = false
+        let model = env.makeAppModel()
+        model.composer.urlText = url
+        let file = env.root.appending(path: "incoming.json")
+        try FileManager.default.createDirectory(at: env.root, withIntermediateDirectories: true)
+        try Data().write(to: file)
+        let share = SharedLink(urls: ["https://example.com/extra"], kind: nil, created: Date(), inboxFile: file)
+        env.sharedLinks = [share]
+        model.handleScenePhaseChange(.active)
+        #expect(model.sharesAwaitingAppend == [share] && model.composer.urlText == url)
+        model.appendSharedDrafts(model.sharesAwaitingAppend)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let expected = url + "\nhttps://example.com/extra"
+        #expect(model.composer.urlText == expected)
+        model.composer.draftDidChange = nil
+        model.composer.urlText = ""
+        #expect(env.makeAppModel().composer.urlText == expected)
+    }
+
+    @Test("Gallery shares and shortcuts choose gallery-dl without altering the default")
+    func galleryHandoffs() throws {
+        let env = try AppTestEnvironment()
+        let model = env.makeAppModel()
+        let entry = ShareInboxFormat.Entry(urls: [url], kind: "gallery", created: Date())
+        env.sharedLinks = [try SharedLinkInbox.decode(ShareInboxFormat.encode(entry))]
+        model.handleScenePhaseChange(.active)
+        #expect(model.enqueueFromShortcut(url: "https://example.com/gallery", kind: nil, gallery: true))
+        #expect(model.queue.items.count == 2)
+        #expect(model.queue.items.allSatisfy { $0.options.backend == .galleryDL })
+        #expect(model.composer.options.backend == .ytdlp && env.settings.storedOptions.backend == .ytdlp)
+    }
+
     @Test("Only-queued shared links switch to the Queue tab")
     func sharedLinksSwitchToQueue() async throws {
         let env = try AppTestEnvironment()

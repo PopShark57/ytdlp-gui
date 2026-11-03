@@ -20,6 +20,7 @@ struct HistoryEntryActionItems: View {
 
     var body: some View {
         let files = model.history.existingFiles(of: entry)
+        if let notice = entry.fileListNotice { Text(notice) }
         if !files.isEmpty {
             Button {
                 onOpen(files)

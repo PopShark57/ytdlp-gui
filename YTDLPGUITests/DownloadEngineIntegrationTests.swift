@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -98,6 +99,7 @@ struct DownloadEngineIntegrationTests {
         let outputURL = try #require(item.outputURL, "no output path was detected")
         #expect(FileManager.default.fileExists(atPath: outputURL.path(percentEncoded: false)))
         #expect(outputURL.lastPathComponent == "Clip.mp4")
+        #expect(item.outputURLs == [outputURL])
         #expect((item.completedFileSize ?? 0) > 0)
         #expect(item.progress.fractionCompleted == 1.0)
     }
@@ -214,6 +216,95 @@ struct DownloadEngineIntegrationTests {
         #expect(!(item.failure?.title.isEmpty ?? true))
     }
 
+    @Test("Playlist history tracks distinct final files across merges and skips")
+    func playlistHistory() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let executable = fixture.root.appending(path: "playlist-tool")
+        // Replay a completed merge followed by an already-downloaded playlist entry.
+        let script = """
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then echo 2026.08.19; exit 0; fi
+        printf abc > 'first merged.mp4'
+        printf de > second.mp4
+        echo '[download] Destination: first.f137.mp4'
+        echo '[Merger] Merging formats into "first merged.mp4"'
+        echo '\(ArgumentBuilder.finalPathMarker)"first merged.mp4"'
+        echo '[download] second.mp4 has already been downloaded'
+        echo '\(ArgumentBuilder.finalPathMarker)"second.mp4"'
+        echo '\(ArgumentBuilder.finalPathMarker)"second.mp4"'
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        await fixture.model.toolchain.setExecutablePath(executable.path, for: .ytdlp)
+        let item = fixture.model.queue.enqueue(url: fixture.sourceURL, options: fixture.makeOptions())
+        let ended = await wait { item.state.isFinished }
+        #expect(ended && item.state == .completed)
+        let entry = try #require(fixture.model.history.entries.first)
+        #expect(entry.outputURLs.map(\.lastPathComponent) == ["first merged.mp4", "second.mp4"])
+        #expect(entry.fileSizeBytes == 5)
+        try FileManager.default.removeItem(at: entry.outputURLs[0])
+        fixture.model.history.refreshFileStatus()
+        let refreshed = await wait { fixture.model.history.existingFiles(of: entry).count == 1 }
+        #expect(refreshed)
+        #expect(fixture.model.history.existingFiles(of: entry).first?.lastPathComponent == "second.mp4")
+    }
+
+    @Test("Immediate cancellation and removal never launch the process")
+    func stopBeforeLaunch() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let queue = fixture.model.queue
+        let cancelled = queue.enqueue(url: fixture.sourceURL, options: fixture.makeOptions())
+        queue.cancel(cancelled)
+        let removed = queue.enqueue(url: "https://example.com/removed", options: fixture.makeOptions())
+        queue.remove(removed)
+        let stopped = await wait { cancelled.state == .cancelled && queue.pendingItem(for: removed.sourceURL) == nil }
+        #expect(stopped)
+        #expect(cancelled.log.lines.isEmpty && removed.log.lines.isEmpty)
+        #expect(fixture.model.history.entries.isEmpty)
+    }
+
+    @Test("Menu bar preference controls last-window termination and persists")
+    func closeWindowWithMenu() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let delegate = AppDelegate()
+        delegate.model = fixture.model
+        #expect(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+        fixture.model.settings.showsQueueMenu = true
+        #expect(!delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+        fixture.model.settings.resetToDefaults()
+        #expect(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
+    }
+
+    @Test("Recovery preserves unfinished work and strips credentials before saving")
+    func recovery() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        var options = fixture.makeOptions()
+        options.proxy = "https://user:secret@proxy.example"
+        let queue = fixture.model.queue
+        queue.enqueue(url: fixture.sourceURL, options: options)
+        queue.enqueue(url: "https://example.com/two", options: fixture.makeOptions())
+        fixture.model.prepareForTermination()
+
+        let recovered = AppModel(settings: fixture.model.settings, history: fixture.model.history)
+        #expect(recovered.queue.interrupted.map(\.url) == [fixture.sourceURL, "https://example.com/two"])
+        let saved = try #require(recovered.queue.interrupted.first)
+        #expect(saved.options.outputDirectory == options.outputDirectory)
+        #expect(!saved.removedSecrets.isEmpty && !saved.options.proxy.contains("secret"))
+        recovered.resume(saved)
+        #expect(recovered.selectedSection == .download && recovered.queue.items.isEmpty)
+        #expect(recovered.composer.urlText == fixture.sourceURL)
+        await recovered.toolchain.refresh()
+        recovered.resume(try #require(recovered.queue.interrupted.last))
+        #expect(recovered.queue.items.count == 1)
+        #expect(recovered.queue.interrupted.count == 1)
+        recovered.queue.cancelAll()
+        _ = await wait { !recovered.queue.isBusy && !queue.isBusy }
+    }
+
     @Test("The concurrency limit is respected")
     func concurrencyLimit() async throws {
         let fixture = try Fixture()
@@ -227,7 +318,11 @@ struct DownloadEngineIntegrationTests {
         options.outputTemplate = "%(title)s-%(autonumber)s.%(ext)s"
 
         let first = fixture.model.queue.enqueue(url: fixture.sourceURL, options: options)
-        let second = fixture.model.queue.enqueue(url: fixture.sourceURL, options: options)
+        let duplicate = fixture.model.queue.enqueue(url: fixture.sourceURL, options: options)
+        #expect(duplicate === first)
+        let secondURL = fixture.root.appending(path: "Second.mp4")
+        try FileManager.default.copyItem(at: fixture.clipURL, to: secondURL)
+        let second = fixture.model.queue.enqueue(url: secondURL.absoluteString, options: options)
 
         _ = await wait(timeout: .seconds(30)) { first.state == .active }
         // With a limit of one, the second item must still be waiting its turn.

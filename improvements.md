@@ -1,3 +1,97 @@
+# YTDLP GUI improvements for macOS 27 and iOS 27
+
+November 3, 2026. All twelve changes from the review of `9c2e665` are implemented. The numbered sections below preserve the original findings and acceptance criteria. The [September iOS audit](#september-2026-ios-audit-historical) is historical.
+
+| Items | Implementation |
+| --- | --- |
+| 1–3 | The Mac redacts previews, diagnostic output and saved History. One pending job owns each URL. Cancellation is remembered before launch, and a removed process holds its slot until it exits. |
+| 4–5 | The Share extension keeps each request until the receiving queue or draft has saved a receipt. Photos imports the selected batch in one transaction and rejects overlapping saves. |
+| 6–7 | The Mac records final playlist outputs using yt-dlp’s `after_move` event. Unfinished jobs reappear in Queue with Resume and Discard actions. Jobs needing credentials or another folder open for editing. |
+| 8–9 | Queue and History use asynchronously checked file lists. A truncated History entry shows how many files it represents and limits file actions to the listed survivors. Legacy single-file entries still decode. |
+| 10–12 | Mac Appearance settings include an opt-in queue menu. Compact iPhone layouts show a tappable active-download summary. Share and Shortcuts support an explicit Gallery choice. |
+
+## Fix first
+
+### 1. Mac · Keep credentials out of command previews, logs and History
+
+The Mac command preview redacts gallery-dl arguments but prints yt-dlp arguments verbatim. The yt-dlp queue also logs the raw display command and writes the item's full options into History. A password embedded in a proxy URL can therefore be exposed by copying the preview, sharing the log or inspecting `history.json`. iOS already redacts the displayed arguments and strips credentials from both new and previously saved history entries.
+
+Use the existing redactor for display on both Mac backends. Scrub new and existing Mac history entries, and tell users which credentials they need to re-enter on replay. **Check** with a fake proxy password and authorization header. Inspect the preview, copied command, initial log line and saved JSON, and verify the launched process still receives the original values. [Mac service](YTDLPGUI/Services/YTDLPService.swift) · [Mac queue](YTDLPGUI/ViewModels/DownloadQueue.swift) · [iOS history migration](YTDLPGUI-iOS/App/AppModel.swift) · [redaction tests](YTDLPGUITests/SecretRedactionTests.swift)
+
+### 2. Mac · Prevent concurrent jobs from writing the same output
+
+The batch enqueue path filters pending URLs. The single-link composer, History replay and retry paths can still start a second job for the same link. Two jobs with identical settings can write to the same partial file. Use one pending-item lookup at the queue boundary and identify the existing job when an action is skipped. Keep completed items eligible for a deliberate new download.
+
+**Check** with concurrency set to two. Submit the same link from New Download and History, then retry a failed copy while the first is active. Expect one process, feedback identifying the existing item, and independent links still able to run together. [Mac queue](YTDLPGUI/ViewModels/DownloadQueue.swift) · [Mac composer](YTDLPGUI/ViewModels/DownloadComposer.swift) · [iOS queue precedent](YTDLPGUI-iOS/ViewModels/DownloadQueue.swift)
+
+### 3. Mac · Honor Cancel and Remove before the child process starts
+
+The scheduler marks an item active and creates a task before assigning a process session. During that interval Cancel has no session to signal. Remove cancels the Swift task, but the runner does not check cancellation before launching the process. A removed item can consequently start work after disappearing from the queue.
+
+Carry the cancellation request across process startup and keep the concurrency slot until a running process actually exits. **Check** with a controlled runner. Cancel or remove immediately after enqueue, before session creation, then repeat during transfer. A removed job must never start later, add a History entry or send a completion notification. [Mac scheduler and runner](YTDLPGUI/ViewModels/DownloadQueue.swift) · [process cancellation](YTDLPGUI/Services/ProcessRunner.swift)
+
+### 4. iOS · Make the Share extension handoff recoverable
+
+The extension writes an atomic inbox file. On launch or foreground activation the app deletes valid entries during `drain`, before their links reach a durable queue or draft. Queue saving is debounced. Shares sent for editing also replace any existing URL text. A termination during handoff can lose an accepted share, and an unrelated incoming share can displace what someone was already editing.
+
+Use the inbox entry ID to acknowledge each share after its queue items or draft are saved. Make redelivery idempotent and offer to append incoming links to an occupied draft. **Check** by interrupting between inbox read, destination save and acknowledgement. Relaunch with exactly one copy of each accepted link. Also share into an occupied composer and verify both sets of links remain accessible. [Inbox reader](YTDLPGUI-iOS/Services/SharedLinkInbox.swift) · [handoff in AppModel](YTDLPGUI-iOS/App/AppModel.swift) · [queue persistence](YTDLPGUI-iOS/ViewModels/DownloadQueue.swift)
+
+### 5. iOS · Retry only the files Photos failed to save
+
+Queue and History save a batch to Photos one file at a time. If the third file fails, the first two have already been imported. The error path loses that distinction and a retry can import both again. Give both entry points one batch operation that reports which files succeeded and retries the remainder, or commits the selected files together.
+
+**Check** with three compatible files and an injected failure on the third. Verify the message matches the actual saved count, retry adds only missing assets, and double-tapping Save cannot start a second batch. [Photos service](YTDLPGUI-iOS/Services/MediaLibrary.swift) · [Queue save loop](YTDLPGUI-iOS/ViewModels/DownloadQueue.swift) · [History save action](YTDLPGUI-iOS/Views/History/HistoryEntryActions.swift)
+
+## Downloads and large collections
+
+### 6. Mac · Keep every final file from a yt-dlp playlist
+
+Mac gallery-dl collects multiple paths. The Mac yt-dlp output tracker holds only one download destination and one processed destination for the entire job. History can therefore show a successful playlist with only one revealable file and that file's size. Capture a final output event per playlist entry, exclude temporary streams, and total the distinct deliverables.
+
+**Check** with a two-video playlist where the first item merges and the second is already downloaded. Reveal both surviving files in Finder, compare the total with their sizes and reopen a legacy single-path history entry. [Output tracker](YTDLPGUI/ViewModels/DownloadQueue.swift) · [history format](Shared/Models/HistoryEntry.swift) · [Finder actions](YTDLPGUI/Views/History/HistoryView.swift)
+
+### 7. Mac · Restore unfinished downloads after quitting
+
+Closing the last window terminates the Mac app. Its quit dialog warns about partial files, but the queue lives in memory and the termination handler only cancels work and flushes History. A user with a long batch must reconstruct the remaining links and options after relaunch.
+
+Persist unfinished jobs as recoverable entries and offer Resume on launch. Preserve order, backend, output folder and nonsecret options. If a folder or credential is unavailable, ask for it before resuming. **Check** by quitting with one active and two waiting jobs, reopening, and resuming each exactly once. Confirm the completed job is absent after a second relaunch. [Mac app lifecycle](YTDLPGUI/App/YTDLPGUIApp.swift) · [termination handler](YTDLPGUI/App/AppModel.swift) · [iOS queue store](YTDLPGUI-iOS/Services/QueueStore.swift)
+
+### 8. Both · Move file availability checks out of scrolling and rendering
+
+Mac History calls `entry.fileExists` several times per row. On iOS, Queue actions filter output URLs with filesystem calls, and History detail resolves stored paths in its view body, which can probe old and current container paths. A large gallery or a slow external Mac volume increases the work on the UI thread. The shared History store already has an asynchronous file-status cache.
+
+Extend that cache to carry ordered resolved paths and existing files. Use a similar snapshot for finished queue items. Refresh after completion and on foreground activation. **Check** a large gallery with some files moved. Scrolling and opening details should perform no per-row filesystem probes, keep output order and offer only surviving files to Finder or Quick Look. [History store](Shared/Services/HistoryStore.swift) · [path resolution](Shared/Models/HistoryEntry.swift) · [Mac row](YTDLPGUI/Views/History/HistoryRowView.swift) · [iOS Queue](YTDLPGUI-iOS/Views/Queue/QueueRowView.swift) · [iOS History detail](YTDLPGUI-iOS/Views/History/HistoryDetailView.swift)
+
+### 9. Both · Tell users when History has kept only part of a gallery
+
+History caps its stored output paths at 500. A 650-file gallery can complete, but the entry keeps the first 500 paths without recording the original count. A file count or batch action based on those paths can appear to cover the entire download. Keep the total count and a visible truncation indicator, or store the complete list separately and load it on demand.
+
+**Check** with 499, 500 and 501 unique outputs, including one missing file. Verify counts, size, and the scope of Reveal, Share and Save actions after relaunch. Older entries with only a primary path should still open. [History path limit](Shared/Models/HistoryEntry.swift) · [entry creation](Shared/Models/DownloadItem.swift) · [iOS file list](YTDLPGUI-iOS/Views/History/HistoryDetailView.swift)
+
+## Platform features worth adding
+
+### 10. macOS 27 · Follow the queue from the menu bar
+
+The main window already shows aggregate progress, but closing it initiates quit. For long batches, offer an opt-in menu bar item showing the active title, waiting count and an Open Queue action. When enabled, let window close leave downloads running and keep explicit Quit wired to the existing confirmation. This also lets users batch links in New Download without switching screens to monitor progress.
+
+**Check** with a running job. Close the window, reopen Queue from the menu bar, and confirm the same job continues. Exercise keyboard navigation, VoiceOver, unknown progress and explicit Quit. [Current scenes and lifecycle](YTDLPGUI/App/YTDLPGUIApp.swift) · [toolbar progress](YTDLPGUI/Views/RootView.swift) · [Apple MenuBarExtra](https://developer.apple.com/documentation/swiftui/menubarextra)
+
+### 11. iOS 27 · Show the active download outside the Queue tab
+
+The iPhone tab badge gives a count, but someone editing another link cannot see which job is running or whether it is downloading or processing. Show a compact, tappable queue summary while work is active. Use the native tab bottom accessory on supported iPhone layouts and retain the existing badge on older systems and sidebar layouts. Reuse the queue's activity data and leave system background progress with the existing continued-processing task.
+
+**Check** indeterminate progress, merging, completion, largest Dynamic Type and Reduce Transparency. Tapping the summary should open Queue once without clearing the draft. Verify iPad sidebar navigation separately. [Tab structure](YTDLPGUI-iOS/Views/RootView.swift) · [queue activity and background reporting](YTDLPGUI-iOS/Services/BackgroundActivity.swift) · [Apple accessory placement](https://developer.apple.com/documentation/swiftui/tabviewbottomaccessoryplacement)
+
+### 12. iOS · Make Gallery an explicit Share and Shortcuts action
+
+The main app supports gallery-dl. The Share extension offers explicit video and audio choices, and the shortcut can select those two kinds or inherit the last-used options. Someone sharing a gallery cannot explicitly select gallery-dl from either surface. Add a Gallery choice that carries its backend through the inbox or intent without changing the user's saved composer settings.
+
+**Check** with video as the last-used mode. Share a gallery directly and via Shortcuts, confirm gallery-dl receives it, then open the composer and verify video remains selected. Decode an existing version-1 video or audio share as part of the same test. [Inbox format](ShareInbox/ShareInboxFormat.swift) · [extension choices](YTDLPGUI-iOS-Share/InboxWriter.swift) · [Shortcuts intent](YTDLPGUI-iOS/Intents/DownloadWithYTDLPGUIIntent.swift) · [app routing](YTDLPGUI-iOS/App/AppModel.swift)
+
+---
+
+## September 2026 iOS audit (historical)
+
 # iOS Codebase Improvement Audit
 
 Audit of the iOS side of YTDLP GUI at commit `bf94ff4` (2026-09-26). Covered:

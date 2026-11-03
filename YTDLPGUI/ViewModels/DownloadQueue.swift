@@ -15,6 +15,17 @@ final class DownloadQueue {
 
     private(set) var items: [DownloadItem] = []
 
+    struct Interrupted: Codable, Identifiable {
+        let id: UUID
+        let url: String
+        let title: String
+        let options: DownloadOptions
+        let removedSecrets: [String]
+    }
+
+    private(set) var interrupted: [Interrupted] = []
+    private let recoveryURL: URL
+    private var terminating = false
     private let settings: AppSettings
     private let toolchain: Toolchain
     private let history: HistoryStore
@@ -24,6 +35,9 @@ final class DownloadQueue {
     /// Live processes, keyed by item id. Kept out of `DownloadItem` so the model stays a plain
     /// value-ish object that SwiftUI can diff cheaply.
     private var sessions: [DownloadItem.ID: ProcessSession] = [:]
+    private var retiring: [UUID: DownloadItem] = [:]
+    private var cancelRequested = Set<UUID>()
+    var notice: String?
     private var runners: [DownloadItem.ID: Task<Void, Never>] = [:]
 
     /// Counts for the "queue finished" notification, reset whenever the queue drains.
@@ -36,6 +50,14 @@ final class DownloadQueue {
         history: HistoryStore,
         notifications: NotificationService
     ) {
+        recoveryURL = history.storageDirectory.appending(path: "unfinished.json")
+        if FileManager.default.fileExists(atPath: recoveryURL.path) {
+            do {
+                interrupted = try JSONDecoder().decode([Interrupted].self, from: Data(contentsOf: recoveryURL))
+            } catch {
+                notice = "Could not restore unfinished downloads: \(error.localizedDescription)"
+            }
+        }
         self.settings = settings
         self.toolchain = toolchain
         self.history = history
@@ -62,35 +84,87 @@ final class DownloadQueue {
         return running.reduce(0, +) / Double(running.count)
     }
 
+    private func saveUnfinished() {
+        guard !terminating else { return }
+        let pending = items.filter { !$0.state.isFinished }.map { item in
+            let clean = item.options.removingSecrets()
+            return Interrupted(id: item.id, url: item.sourceURL, title: item.displayTitle,
+                               options: clean.options, removedSecrets: clean.removed)
+        }
+        do {
+            try FileManager.default.createDirectory(at: history.storageDirectory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(interrupted + pending).write(to: recoveryURL, options: .atomic)
+        } catch {
+            notice = "Could not save unfinished downloads: \(error.localizedDescription)"
+        }
+    }
+
+    func prepareForTermination() {
+        saveUnfinished()
+        terminating = true
+        cancelAll()
+    }
+
+    func forgetInterrupted(_ id: UUID) {
+        interrupted.removeAll { $0.id == id }
+        saveUnfinished()
+    }
+
     // MARK: - Adding
 
     /// Adds one URL to the queue.
     @discardableResult
-    func enqueue(url: String, options: DownloadOptions, info: MediaInfo? = nil) -> DownloadItem {
+    func enqueue(url: String, options: DownloadOptions, info: MediaInfo? = nil, resuming id: UUID? = nil) -> DownloadItem {
+        if let existing = pendingItem(for: url) {
+            notice = "Already in the queue: \(existing.displayTitle)"
+            return existing
+        }
+        let item = append(url: url.trimmingCharacters(in: .whitespacesAndNewlines), options: options, info: info, resuming: id)
+        saveUnfinished()
+        startEligibleItems()
+        return item
+    }
+
+    private func append(url: String, options: DownloadOptions, info: MediaInfo? = nil, resuming id: UUID? = nil) -> DownloadItem {
+        let saved = interrupted.first { $0.id == id && $0.url == url }
         let item = DownloadItem(
+            id: saved?.id ?? UUID(),
             sourceURL: url,
             options: options,
-            title: info?.title,
+            title: info?.title ?? saved?.title,
             uploader: info?.displayUploader,
             thumbnailURL: info?.thumbnailURL,
             durationSeconds: info?.duration,
             isPlaylist: info?.isPlaylist ?? false,
             playlistCount: info?.playlistCount
         )
+        if let saved { interrupted.removeAll { $0.id == saved.id } }
         items.append(item)
-        startEligibleItems()
         return item
     }
 
     /// Adds several URLs at once, skipping blanks and duplicates already waiting to run.
     @discardableResult
     func enqueue(urls: [String], options: DownloadOptions) -> [DownloadItem] {
-        let pending = Set(items.filter { !$0.state.isFinished }.map(\.sourceURL))
-        var seen = Set<String>()
-        return urls
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && !pending.contains($0) && seen.insert($0).inserted }
-            .map { enqueue(url: $0, options: options) }
+        var added: [DownloadItem] = []
+        var known = Set(items.filter { !$0.state.isFinished }.map(\.sourceURL))
+        known.formUnion(retiring.values.map(\.sourceURL))
+        for raw in urls {
+            let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !url.isEmpty, known.insert(url).inserted else { continue }
+            added.append(append(url: url, options: options))
+        }
+        if !added.isEmpty {
+            saveUnfinished()
+            startEligibleItems()
+        }
+        return added
+    }
+
+    func pendingItem(for url: String) -> DownloadItem? {
+        let key = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        return items.first { !$0.state.isFinished && $0.sourceURL == key }
+            ?? retiring.values.first { $0.sourceURL == key }
     }
 
     // MARK: - Queue control
@@ -100,11 +174,13 @@ final class DownloadQueue {
         case .active:
             // The session's own termination path finishes the item; marking it here would
             // race with the final events still in flight.
+            cancelRequested.insert(item.id)
             sessions[item.id]?.cancel()
         case .queued:
             item.state = .cancelled
             item.phase = .cancelled
             item.finishedAt = Date()
+            saveUnfinished()
         default:
             break
         }
@@ -116,23 +192,28 @@ final class DownloadQueue {
 
     func retry(_ item: DownloadItem) {
         guard item.canRetry else { return }
+        if let existing = pendingItem(for: item.sourceURL) {
+            notice = "Already in the queue: \(existing.displayTitle)"
+            return
+        }
         item.prepareForRetry()
+        saveUnfinished()
         startEligibleItems()
     }
 
     func retryAllFailed() {
-        for item in items where item.state == .failed { item.prepareForRetry() }
+        for item in items where item.state == .failed { retry(item) }
         startEligibleItems()
     }
 
     func remove(_ item: DownloadItem) {
         if item.state == .active {
+            cancelRequested.insert(item.id)
             sessions[item.id]?.cancel()
         }
-        runners[item.id]?.cancel()
-        runners[item.id] = nil
-        sessions[item.id] = nil
+        if runners[item.id] != nil { retiring[item.id] = item }
         items.removeAll { $0.id == item.id }
+        saveUnfinished()
         startEligibleItems()
     }
 
@@ -153,9 +234,10 @@ final class DownloadQueue {
 
     /// Starts queued items until the concurrency limit is reached.
     private func startEligibleItems() {
+        guard !terminating else { return }
         let limit = settings.maximumConcurrentDownloads.constrained(to: AppSettings.concurrencyRange)
         for item in items where item.state == .queued {
-            guard activeCount < limit else { break }
+            guard runners.count < limit else { break }
             start(item)
         }
 
@@ -176,11 +258,19 @@ final class DownloadQueue {
 
     private func run(_ item: DownloadItem) async {
         defer {
+            saveUnfinished()
+            retiring[item.id] = nil
+            cancelRequested.remove(item.id)
             runners[item.id] = nil
             sessions[item.id] = nil
             startEligibleItems()
         }
 
+        guard retiring[item.id] == nil else { return }
+        if cancelRequested.contains(item.id) {
+            finishCancelled(item)
+            return
+        }
         guard let service = toolchain.service(for: item.options.backend) else {
             finish(item, failure: DownloadFailure(
                 kind: .toolMissing(item.options.backend.rawValue),
@@ -205,9 +295,7 @@ final class DownloadQueue {
 
         let session = service.makeDownloadSession(url: item.sourceURL, options: item.options)
         sessions[item.id] = session
-        item.log.append("$ " + (item.options.backend == .galleryDL
-            ? service.previewCommand(url: item.sourceURL, options: item.options)
-            : session.configuration.displayCommand))
+        item.log.append("$ " + session.configuration.displayCommand)
 
         do {
             try session.start()
@@ -220,13 +308,24 @@ final class DownloadQueue {
         }
 
         item.phase = .downloading
+        let secrets = ShellQuoting.logRedactions(in: session.configuration.arguments)
         var tracker = OutputTracker(outputDirectory: item.options.outputDirectory)
         var result: ProcessResult?
 
         for await event in session.events {
             switch event {
             case .standardOutput(let line), .standardError(let line):
-                record(line, on: item)
+                if item.options.backend == .ytdlp, line.hasPrefix(ArgumentBuilder.finalPathMarker) {
+                    let json = Data(line.dropFirst(ArgumentBuilder.finalPathMarker.count).utf8)
+                    if let path = try? JSONDecoder().decode(String.self, from: json) {
+                        tracker.recordProcessed(path: path)
+                        if let url = tracker.finalURL, !item.outputURLs.contains(url) { item.outputURLs.append(url) }
+                    }
+                    continue
+                }
+                if !line.hasPrefix(ArgumentBuilder.progressMarker) {
+                    item.log.append(ShellQuoting.sanitizedLogLine(line, secrets: secrets))
+                }
                 if item.options.backend == .galleryDL {
                     if let url = GalleryDLArguments.fileURL(from: line, outputDirectory: item.options.outputDirectory), !item.outputURLs.contains(url) {
                         item.outputURLs.append(url)
@@ -241,19 +340,20 @@ final class DownloadQueue {
             }
         }
 
+        guard retiring[item.id] == nil else { return }
         guard let result else {
             finish(item, failure: DownloadFailure(kind: .unknown, underlyingMessage: nil))
             return
         }
 
-        if result.wasCancelled {
+        if result.wasCancelled || cancelRequested.contains(item.id) {
             finishCancelled(item)
             return
         }
 
         if result.isSuccess {
-            item.outputURL = tracker.finalURL
-            item.completedFileSize = item.options.backend == .galleryDL
+            item.outputURL = item.outputURLs.last ?? tracker.finalURL
+            item.completedFileSize = !item.outputURLs.isEmpty
                 ? item.outputURLs.reduce(Int64(0)) { total, url in
                     total + Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
                 } : tracker.fileSize()
@@ -269,17 +369,6 @@ final class DownloadQueue {
             }
             finish(item, failure: failure)
         }
-    }
-
-    /// Adds a line to the item's log, dropping machine-readable progress ticks.
-    ///
-    /// A long download emits thousands of progress lines. Keeping them would push the lines
-    /// that actually explain a failure out of the capped buffer, leave the log view showing
-    /// almost nothing useful, and make SwiftUI re-diff the log on every tick. Their content is
-    /// already reflected in the progress bar.
-    private func record(_ line: String, on item: DownloadItem) {
-        guard !line.hasPrefix(ArgumentBuilder.progressMarker) else { return }
-        item.log.append(line)
     }
 
     // MARK: - Event application
@@ -382,7 +471,10 @@ final class DownloadQueue {
             completedSinceIdle += 1
         }
 
-        history.add(item.makeHistoryEntry())
+        item.refreshFileAvailability()
+        var entry = item.makeHistoryEntry()
+        entry.removeSecrets()
+        history.add(entry)
 
         if settings.notifyWhenComplete {
             let playSound = settings.playSoundWhenComplete

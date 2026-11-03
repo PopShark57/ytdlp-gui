@@ -113,6 +113,12 @@ private struct LinkChoiceView: View {
                 VStack(spacing: 10) { downloadButtons }
             }
             Button {
+                model.handOver(as: .gallery)
+            } label: {
+                Label("Download Gallery", systemImage: "photo.stack").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            Button {
                 model.handOver(as: nil)
             } label: {
                 Label("Add to YTDLP GUI", systemImage: "plus")

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HistoryRowView: View {
     let entry: HistoryEntry
+    var status: HistoryFileStatus?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -45,6 +46,7 @@ struct HistoryRowView: View {
 
                 if entry.succeeded {
                     successDetail
+                    if let notice = entry.fileListNotice { Text(notice).font(.caption) }
                 } else {
                     failureDetail
                 }
@@ -64,16 +66,16 @@ struct HistoryRowView: View {
     private var successDetail: some View {
         if let path = entry.outputPath {
             HStack(spacing: 5) {
-                Image(systemName: entry.fileExists ? "doc" : "doc.badge.ellipsis")
+                Image(systemName: status?.isMissing != true ? "doc" : "doc.badge.ellipsis")
                     .imageScale(.small)
-                    .foregroundStyle(entry.fileExists ? Color.secondary : Color.orange)
+                    .foregroundStyle(status?.isMissing != true ? Color.secondary : Color.orange)
                 Text(displayPath(path))
                     .font(.caption)
-                    .foregroundStyle(entry.fileExists ? Color.secondary : Color.orange)
+                    .foregroundStyle(status?.isMissing != true ? Color.secondary : Color.orange)
                     .lineLimit(1)
                     .truncationMode(.head)
-                if !entry.fileExists {
-                    Text("— file moved or deleted")
+                if let status, status.missingCount > 0 {
+                    Text(status.recordedCount == 1 ? "File moved or deleted" : "\(status.missingCount) listed files missing")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -100,9 +102,9 @@ struct HistoryRowView: View {
 
     private var actions: some View {
         HStack(spacing: 4) {
-            if entry.fileExists, let url = entry.outputURL {
+            if let files = status?.existingURLs, !files.isEmpty {
                 iconButton("Reveal in Finder", "magnifyingglass") {
-                    FinderIntegration.reveal(entry.outputURLs.isEmpty ? [url] : entry.outputURLs)
+                    FinderIntegration.reveal(files)
                 }
             }
             iconButton("Copy source URL", "link") {

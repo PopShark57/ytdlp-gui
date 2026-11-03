@@ -77,64 +77,57 @@ final class MediaLibrary {
         }
     }
 
-    /// Asks for add-only access if needed, then saves.
-    func saveToPhotos(_ url: URL) async throws {
-        let name = url.lastPathComponent
-        let path = url.path(percentEncoded: false)
-        guard FileManager.default.fileExists(atPath: path) else { throw SaveError.fileMissing(name) }
+    private var importing = Set<URL>()
+    private let commitBatch: ([URL]) async throws -> Void
 
-        let resourceType: PHAssetResourceType
-        switch Self.kind(of: url) {
-        case .video:
-            guard UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(path) else {
-                throw SaveError.incompatibleVideo(name)
-            }
-            resourceType = .video
-        case .image:
-            resourceType = .photo
-        case .audio:
-            throw SaveError.audioNotSupported(name)
-        case nil:
-            throw SaveError.unsupportedFile(name)
-        }
-
-        switch await PHPhotoLibrary.requestAuthorization(for: .addOnly) {
-        case .authorized, .limited:
-            break
-        case .restricted:
-            throw SaveError.accessRestricted
-        case .denied, .notDetermined:
-            throw SaveError.accessDenied
-        @unknown default:
-            throw SaveError.accessDenied
-        }
-
-        do {
-            try await PHPhotoLibrary.shared().performChanges {
-                let options = PHAssetResourceCreationOptions()
-                options.originalFilename = name
-                PHAssetCreationRequest.forAsset().addResource(with: resourceType, fileURL: url, options: options)
-            }
-        } catch {
-            throw SaveError.failed(name: name, reason: error.localizedDescription)
-        }
+    init(commitBatch: @escaping ([URL]) async throws -> Void = MediaLibrary.commitToPhotos) {
+        self.commitBatch = commitBatch
     }
 
-    /// Saves each of the files Photos can take, and says how many that was. Throws when there
-    /// were none, or when saving one of them failed.
+    /// A single Photos transaction either creates every asset or rolls the batch back.
     @discardableResult
     func saveToPhotos(_ files: [URL]) async throws -> Int {
+        guard !files.isEmpty else { return 0 }
+        let selection = Set(files)
+        guard importing.isDisjoint(with: selection) else { throw SaveError.failed(name: "selection", reason: "A save is already in progress.") }
+        importing.formUnion(selection)
+        defer { importing.subtract(selection) }
         let compatible = await Self.photosCompatibleFiles(among: files)
         guard !compatible.isEmpty else {
-            // Trying the first one explains why it can't be saved.
-            guard let first = files.first else { return 0 }
-            try await saveToPhotos(first)
-            return 1
+            let url = files[0]
+            if !FileManager.default.fileExists(atPath: url.path) { throw SaveError.fileMissing(url.lastPathComponent) }
+            if Self.kind(of: url) == .video { throw SaveError.incompatibleVideo(url.lastPathComponent) }
+            if Self.kind(of: url) == .audio { throw SaveError.audioNotSupported(url.lastPathComponent) }
+            throw SaveError.unsupportedFile(url.lastPathComponent)
         }
-        for file in compatible {
-            try await saveToPhotos(file)
+        // Eligibility was established before offering this action. If a selected file
+        // disappeared in the meantime, don't silently commit a partial selection.
+        let eligible = Set(compatible)
+        if let missing = files.first(where: { !eligible.contains($0) }) {
+            throw SaveError.unsupportedFile(missing.lastPathComponent)
         }
+        try await commitBatch(compatible)
         return compatible.count
+    }
+
+    private static func commitToPhotos(_ files: [URL]) async throws {
+        switch await PHPhotoLibrary.requestAuthorization(for: .addOnly) {
+        case .authorized, .limited: break
+        case .restricted: throw SaveError.accessRestricted
+        default: throw SaveError.accessDenied
+        }
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                for url in files {
+                    let options = PHAssetResourceCreationOptions()
+                    options.originalFilename = url.lastPathComponent
+                    let type: PHAssetResourceType = Self.kind(of: url) == .video ? .video : .photo
+                    PHAssetCreationRequest.forAsset().addResource(with: type, fileURL: url, options: options)
+                }
+            }
+        } catch {
+            throw SaveError.failed(name: files.first?.lastPathComponent ?? "selection", reason: "No files were saved. " + error.localizedDescription)
+        }
     }
 
     private nonisolated static func kind(of url: URL) -> MediaKind? {

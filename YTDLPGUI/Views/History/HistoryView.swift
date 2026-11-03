@@ -65,7 +65,7 @@ struct HistoryView: View {
     private var list: some View {
         List(selection: $selection) {
             ForEach(filteredEntries) { entry in
-                HistoryRowView(entry: entry)
+                HistoryRowView(entry: entry, status: history.fileStatus[entry.id])
                     .tag(entry.id)
                     .contextMenu { contextMenu(for: entry) }
             }
@@ -113,7 +113,7 @@ struct HistoryView: View {
                 Label("Remove Missing", systemImage: "questionmark.folder")
             }
             .help("Remove entries whose file is no longer on disk")
-            .disabled(history.entries.isEmpty)
+            .disabled(!history.hasMissingFiles)
 
             Button {
                 if model.settings.confirmBeforeClearingHistory {
@@ -133,8 +133,9 @@ struct HistoryView: View {
 
     @ViewBuilder
     private func contextMenu(for entry: HistoryEntry) -> some View {
-        if let url = entry.outputURL, entry.fileExists {
-            Button("Reveal in Finder") { FinderIntegration.reveal(entry.outputURLs.isEmpty ? [url] : entry.outputURLs) }
+        let files = history.existingFiles(of: entry)
+        if let url = files.first {
+            Button("Reveal in Finder") { FinderIntegration.reveal(files) }
             Button("Open") { FinderIntegration.open(url) }
             Divider()
         }
@@ -165,6 +166,10 @@ struct HistoryView: View {
     /// Re-queues the entry using the exact options it was originally downloaded with,
     /// after stripping any denied custom arguments so history cannot replay `--exec`.
     private func downloadAgain(_ entry: HistoryEntry) {
+        if let removed = entry.removedSecretOptions, !removed.isEmpty {
+            loadIntoComposer(entry)
+            return
+        }
         var options = entry.options ?? model.composer.options
         let inspection = CustomArgumentPolicy.inspect(options.customArguments)
         if inspection.isBlocked {
@@ -198,6 +203,9 @@ struct HistoryView: View {
                     "Stripped dangerous custom option\(inspection.blockedFlags.count == 1 ? "" : "s") from history: \(listed)."
                 )
             }
+        }
+        if let removed = entry.removedSecretOptions, !removed.isEmpty {
+            model.composer.showStatus("Re-enter \(removed.joined(separator: ", ")) before downloading again.")
         }
         model.composer.setURLText(entry.sourceURL, analyzeIfEnabled: false)
         model.selectedSection = .download

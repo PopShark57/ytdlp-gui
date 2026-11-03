@@ -72,14 +72,20 @@ final class AppModel {
     private var hasClipboardSuggestion = false
 
     private let clipboard: any ClipboardLinkDetecting
+    var sharesAwaitingAppend: [SharedLink] = []
+    private var draftFile: URL { history.storageDirectory.appending(path: "share-draft.json") }
+    private struct SharedDraft: Codable {
+        var text: String
+        var receipts: Set<String>
+    }
+    private var sharedDraft: SharedDraft?
     private let drainSharedInbox: () -> [SharedLink]
     /// The clipboard's `changeCount` when it was last looked at, so the same contents are only
     /// ever offered once.
     @ObservationIgnored private var lastCheckedClipboardChangeCount: Int?
     @ObservationIgnored private var hasPerformedLaunchSetup = false
 
-    convenience init() {
-        let settings = AppSettings()
+    convenience init(settings: AppSettings = AppSettings()) {
         let storage = StorageManager()
         let cookies = CookieStore()
         let history = HistoryStore()
@@ -155,6 +161,18 @@ final class AppModel {
         self.clipboard = clipboard
         self.drainSharedInbox = drainSharedInbox
 
+        if let data = try? Data(contentsOf: draftFile), let saved = try? JSONDecoder().decode(SharedDraft.self, from: data) {
+            sharedDraft = saved
+            composer.setURLText(saved.text, analyzeIfEnabled: false)
+        }
+        composer.draftDidChange = { [weak self] text in
+            guard let self, var saved = self.sharedDraft, saved.text != text else { return }
+            saved.text = text
+            do { try self.saveDraft(saved) }
+            catch { self.status.show("Could not save the shared draft: \(error.localizedDescription)") }
+        }
+
+        queue.restoreUnfinishedItems()
         storage.isPartialDownloadInUse = { [weak queue] in
             (queue?.activeCount ?? 0) > 0
         }
@@ -198,6 +216,7 @@ final class AppModel {
             queue.resumeInterruptedDownloads()
             // Files may have been deleted or moved back in the Files app meanwhile.
             history.refreshFileStatus()
+            for item in queue.finishedItems { item.refreshFileAvailability() }
             receiveSharedLinks()
             Task { await checkClipboard() }
         case .background:
@@ -271,23 +290,29 @@ final class AppModel {
         let links = drainSharedInbox()
         guard !links.isEmpty else { return }
 
-        var linksForComposer: [String] = []
+        var drafts: [SharedLink] = []
         var queuedCount = 0
         for link in links {
-            if let kind = link.kind {
+            if link.kind != nil || link.isGallery {
                 var options = settings.storedOptions
-                options.backend = .ytdlp
-                options.kind = kind
-                queuedCount += queue.enqueue(urls: link.urls, options: options).count
+                options.backend = link.isGallery ? .galleryDL : .ytdlp
+                if let kind = link.kind { options.kind = kind }
+                do { queuedCount += try queue.acceptShare(link, options: options) }
+                catch { status.show("Shared download is awaiting delivery: \(error.localizedDescription)") }
             } else {
-                linksForComposer += link.urls
+                drafts.append(link)
             }
         }
 
-        if !linksForComposer.isEmpty {
-            hasClipboardSuggestion = false
-            composer.setURLText(linksForComposer.joined(separator: "\n"), analyzeIfEnabled: true)
-            selectedTab = .download
+        if !drafts.isEmpty {
+            if composer.urlText.isEmpty { appendSharedDrafts(drafts) }
+            else {
+                let delivered = drafts.filter { link in
+                    link.inboxFile.map { sharedDraft?.receipts.contains($0.lastPathComponent) == true } ?? false
+                }
+                for link in delivered { try? link.acknowledge() }
+                sharesAwaitingAppend = drafts.filter { !delivered.contains($0) }
+            }
         } else if queuedCount > 0 {
             selectedTab = .queue
         }
@@ -298,12 +323,49 @@ final class AppModel {
         }
     }
 
+    func appendSharedDrafts(_ links: [SharedLink]) {
+        sharesAwaitingAppend = []
+        var draft = sharedDraft ?? SharedDraft(text: composer.urlText, receipts: [])
+        draft.text = composer.urlText
+        var known = Set(composer.detectedURLs)
+        for link in links {
+            if let id = link.inboxFile?.lastPathComponent, !draft.receipts.insert(id).inserted { continue }
+            let added = link.urls.filter { known.insert($0).inserted }
+            draft.text = ([draft.text] + added).filter { !$0.isEmpty }.joined(separator: "\n")
+        }
+        do {
+            try saveDraft(draft)
+            hasClipboardSuggestion = false
+            composer.setURLText(draft.text, analyzeIfEnabled: true)
+            selectedTab = .download
+            for link in links {
+                try link.acknowledge()
+                if let id = link.inboxFile?.lastPathComponent { draft.receipts.remove(id) }
+            }
+            try saveDraft(draft)
+        } catch { status.show("Shared links are awaiting delivery: \(error.localizedDescription)") }
+    }
+
+    private func saveDraft(_ draft: SharedDraft) throws {
+        if draft.text.isEmpty && draft.receipts.isEmpty {
+            if FileManager.default.fileExists(atPath: draftFile.path) {
+                try FileManager.default.removeItem(at: draftFile)
+            }
+            sharedDraft = nil
+            return
+        }
+        try FileManager.default.createDirectory(at: history.storageDirectory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(draft).write(to: draftFile, options: .atomic)
+        sharedDraft = draft
+    }
+
     /// Queues a link from the "Download with YTDLP GUI" shortcut, which the person set up and
     /// ran deliberately. Returns whether it was added (it isn't when already waiting).
     @discardableResult
-    func enqueueFromShortcut(url: String, kind: DownloadKind?) -> Bool {
+    func enqueueFromShortcut(url: String, kind: DownloadKind?, gallery: Bool = false) -> Bool {
         var options = settings.storedOptions
-        if let kind { options.backend = .ytdlp; options.kind = kind }
+        if gallery { options.backend = .galleryDL }
+        else if let kind { options.backend = .ytdlp; options.kind = kind }
         let added = queue.enqueue(urls: [url], options: options)
         selectedTab = .queue
         return !added.isEmpty

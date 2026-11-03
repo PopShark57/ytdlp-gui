@@ -47,6 +47,7 @@ final class AppModel {
     /// Set when the user asks to see a specific queue item's log.
     var focusedLogItemID: DownloadItem.ID?
 
+    private var didSetUp = false
     private var lastSeenClipboardText: String?
 
     init(
@@ -71,6 +72,10 @@ final class AppModel {
 
     /// Work that must happen once, after the first window exists.
     func performLaunchSetup() async {
+        guard !didSetUp else { return }
+        didSetUp = true
+        if !queue.interrupted.isEmpty { selectedSection = .queue }
+        history.updateEntries { $0.removeSecrets() }
         settings.applyAppearance()
         await toolchain.refresh()
     }
@@ -82,6 +87,8 @@ final class AppModel {
     /// The same clipboard contents are only ever offered once, so returning to the app after
     /// dismissing a suggestion doesn't keep re-filling the field.
     func handleAppDidBecomeActive() {
+        history.refreshFileStatus()
+        for item in queue.finishedItems { item.refreshFileAvailability() }
         guard settings.readClipboardOnActivate else { return }
         guard composer.urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard let text = Pasteboard.string(), text != lastSeenClipboardText else { return }
@@ -110,6 +117,31 @@ final class AppModel {
         composer.analyze()
     }
 
+    func resume(_ saved: DownloadQueue.Interrupted) {
+        var directory: ObjCBool = false
+        let path = saved.options.outputDirectory.path
+        let usable = FileManager.default.fileExists(atPath: path, isDirectory: &directory)
+            && directory.boolValue && FileManager.default.isWritableFile(atPath: path)
+        if usable && saved.removedSecrets.isEmpty {
+            guard toolchain.isReady(for: saved.options.backend) else {
+                queue.notice = "Set up \(saved.options.backend.displayName) in Settings before resuming this download."
+                return
+            }
+            queue.enqueue(url: saved.url, options: saved.options, resuming: saved.id)
+        } else {
+            composer.editingInterrupted = saved
+            composer.options = saved.options
+            composer.setURLText(saved.url, analyzeIfEnabled: false)
+            selectedSection = .download
+            var instructions: [String] = []
+            if !usable { instructions.append("Choose an available output folder.") }
+            if !saved.removedSecrets.isEmpty {
+                instructions.append("Re-enter \(saved.removedSecrets.joined(separator: ", ")).")
+            }
+            composer.showStatus(instructions.joined(separator: " "))
+        }
+    }
+
     func chooseOutputDirectory() {
         composer.chooseOutputDirectory()
     }
@@ -125,7 +157,7 @@ final class AppModel {
 
     /// Called from `applicationWillTerminate` so nothing pending is lost.
     func prepareForTermination() {
-        queue.cancelAll()
+        queue.prepareForTermination()
         history.flush()
     }
 

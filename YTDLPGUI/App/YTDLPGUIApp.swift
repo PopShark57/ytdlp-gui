@@ -8,6 +8,7 @@ struct YTDLPGUIApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
+        @Bindable var settings = model.settings
         Window("YTDLP GUI", id: WindowID.main) {
             RootView()
                 .environment(model)
@@ -25,10 +26,37 @@ struct YTDLPGUIApp: App {
         .windowToolbarStyle(.unified)
         .commands { AppCommands(model: model) }
 
+        MenuBarExtra("Download Queue", systemImage: "arrow.down.circle", isInserted: $settings.showsQueueMenu) {
+            QueueMenu(model: model)
+        }
+
         Settings {
             SettingsRootView()
                 .environment(model)
         }
+    }
+}
+
+private struct QueueMenu: View {
+    let model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        if let active = model.queue.activeItems.first {
+            Text(active.displayTitle)
+            let percent = active.phase.isIndeterminate ? nil : active.progress.percentLabel
+            Text([active.phase.displayName, percent].compactMap { $0 }.joined(separator: " · "))
+        } else {
+            Text("No active download")
+        }
+        Text("\(model.queue.queuedCount) waiting")
+        Button("Open Queue") {
+            model.selectedSection = .queue
+            openWindow(id: WindowID.main)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        Divider()
+        Button("Quit YTDLP GUI") { NSApp.terminate(nil) }
     }
 }
 
@@ -44,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var model: AppModel?
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        model?.settings.showsQueueMenu != true
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -69,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : "\(count) downloads are still in progress."
         // yt-dlp keeps its .part files so an interrupted download can resume, so this
         // deliberately does not promise any cleanup.
-        alert.informativeText = "Quitting now will stop them. Any partly downloaded files are left in place."
+        alert.informativeText = "Quitting stops these downloads. You can resume unfinished items from Queue when you reopen the app."
         alert.addButton(withTitle: "Quit Anyway")
         alert.addButton(withTitle: "Cancel")
 

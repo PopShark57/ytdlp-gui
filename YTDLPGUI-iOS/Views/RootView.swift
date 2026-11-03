@@ -25,12 +25,47 @@ struct RootView: View {
                 SettingsView()
             }
         }
+        .alert("Append shared links to your draft?", isPresented: Binding(
+            get: { !model.sharesAwaitingAppend.isEmpty },
+            set: { if !$0 { model.sharesAwaitingAppend = [] } }
+        ), presenting: model.sharesAwaitingAppend) { links in
+            Button("Append Links") { model.appendSharedDrafts(links) }
+            Button("Later", role: .cancel) {}
+        }
+        .modifier(QueueAccessory(model: model))
         .tabViewStyle(.sidebarAdaptable)
         .tint(MobileTheme.accent)
         .overlay(alignment: .top) {
             StatusToastHost(message: model.status.message) {
                 model.status.dismiss()
             }
+        }
+    }
+}
+
+private struct QueueAccessory: ViewModifier {
+    let model: AppModel
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.1, *), UIDevice.current.userInterfaceIdiom == .phone, sizeClass == .compact {
+            content.tabViewBottomAccessory(isEnabled: model.queue.isBusy && model.selectedTab != .queue) {
+                if let item = model.queue.activeItems.first ?? model.queue.queuedItems.first {
+                    Button {
+                        model.selectedTab = .queue
+                    } label: {
+                        Label {
+                            let percent = item.phase.isIndeterminate ? nil : item.progress.percentLabel
+                            Text([item.phase.displayName, percent, item.displayTitle].compactMap { $0 }.joined(separator: " · "))
+                                .lineLimit(1)
+                        } icon: { Image(systemName: "arrow.down.circle") }
+                    }
+                    .accessibilityHint("Opens the download queue")
+                }
+            }
+        } else {
+            content
         }
     }
 }

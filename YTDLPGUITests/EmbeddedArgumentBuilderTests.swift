@@ -407,6 +407,7 @@ struct ArgumentBuilderCookieFileTests {
             "--newline", "--color", "never",
             "--progress", "--progress-template", ArgumentBuilder.downloadProgressTemplate,
             "--progress-template", ArgumentBuilder.postProcessTemplate,
+            "--no-simulate", "--print", "after_move:" + ArgumentBuilder.finalPathMarker + "%(filepath)j",
             "--ignore-config",
             "--paths", "/tmp/downloads",
             "--output", "%(title)s.%(ext)s",

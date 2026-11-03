@@ -56,6 +56,41 @@ enum ShellQuoting {
         return result
     }
 
+    /// Child-process diagnostics can echo option values in addition to the displayed command.
+    /// Build the substitutions once per job, then apply only to the human-readable log.
+    static func logRedactions(in arguments: [String]) -> [String] {
+        var secrets = Set<String>()
+        for match in secretMatches(in: arguments) {
+            guard let value = match.inlineValue ?? match.valueIndex.map({ arguments[$0] }),
+                  !value.isEmpty else { continue }
+            switch match.kind {
+            case .value:
+                secrets.insert(value)
+            case .proxyURL:
+                let start = value.range(of: "://")?.upperBound ?? value.startIndex
+                let end = value[start...].firstIndex { "/?#".contains($0) } ?? value.endIndex
+                if let at = value[start..<end].lastIndex(of: "@") {
+                    let credentials = value[start..<at]
+                    secrets.insert(String(credentials))
+                    if let colon = credentials.firstIndex(of: ":") {
+                        secrets.insert(String(credentials[credentials.index(after: colon)...]))
+                    }
+                }
+            case .header:
+                if isSecretHeader(value), let colon = value.firstIndex(of: ":") {
+                    let header = value[value.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                    secrets.insert(header)
+                    if header.lowercased().hasPrefix("bearer ") { secrets.insert(String(header.dropFirst(7))) }
+                }
+            }
+        }
+        return secrets.filter { !$0.isEmpty }.sorted { $0.count > $1.count }
+    }
+
+    static func sanitizedLogLine(_ line: String, secrets: [String]) -> String {
+        secrets.reduce(line) { $0.replacingOccurrences(of: $1, with: redactedPlaceholder) }
+    }
+
     /// The arguments without their secrets, for saving: the options `redactingSecrets` masks are
     /// removed along with their values, except proxies, which keep their address and lose only
     /// their user name and password. Also returns the options that lost something, each named

@@ -16,6 +16,8 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     /// `maximumStoredOutputPaths`. `nil` for entries saved before they were recorded, which
     /// only know `outputPath`.
     var outputPaths: [String]?
+    var totalOutputCount: Int?
+
     var date: Date
     var formatSummary: String
     var kind: DownloadKind
@@ -58,6 +60,7 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
         self.title = title
         self.sourceURL = sourceURL
         self.outputPath = outputPath
+        self.totalOutputCount = outputPaths?.count
         self.outputPaths = outputPaths.map { Array($0.prefix(Self.maximumStoredOutputPaths)) }
         self.date = date
         self.formatSummary = formatSummary
@@ -72,12 +75,28 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
         self.removedSecretOptions = removedSecretOptions
     }
 
+    /// Older versions capped paths without recording the original total.
+    var fileListNotice: String? {
+        guard let count = outputPaths?.count else { return nil }
+        if let totalOutputCount, totalOutputCount > count {
+            return "History lists the first \(count) of \(totalOutputCount) files. File actions apply to the listed files."
+        }
+        if totalOutputCount == nil && count == Self.maximumStoredOutputPaths {
+            return "This older entry lists \(count) files and may have additional outputs. File actions apply to the listed files."
+        }
+        return nil
+    }
+
     /// Leaves passwords and other credentials out of `options`, and records which options had
     /// them. See `DownloadOptions.removingSecrets()`.
     mutating func removeSecrets() {
         guard let options else { return }
         let stripped = options.removingSecrets()
         guard !stripped.removed.isEmpty else { return }
+        if let detail = failureDetail {
+            let args = ["--proxy", options.proxy] + ShellQuoting.split(options.customArguments)
+            failureDetail = ShellQuoting.sanitizedLogLine(detail, secrets: ShellQuoting.logRedactions(in: args))
+        }
         self.options = stripped.options
         var removed = removedSecretOptions ?? []
         for name in stripped.removed where !removed.contains(name) {
@@ -144,7 +163,7 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     }
 
     var fileName: String? {
-        outputURL?.lastPathComponent
+        outputPath.map { URL(fileURLWithPath: $0).lastPathComponent }
     }
 
     /// Fields matched by the history search field.

@@ -225,11 +225,12 @@ private struct QueueItemInfoList: View {
 
     private func fileSection(existingFiles: [URL]) -> some View {
         let files = item.outputURLs.isEmpty ? item.outputURL.map { [$0] } ?? [] : item.outputURLs
+        let present = Set(existingFiles)
         return Section {
             if files.count > 1 {
                 DisclosureGroup {
                     ForEach(files, id: \.self) { file in
-                        FileNameRow(url: file, isMissing: !existingFiles.contains(file))
+                        FileNameRow(url: file, isMissing: item.checkedOutputURLs != nil && !present.contains(file))
                     }
                 } label: {
                     LabeledContent("Files", value: files.count.formatted())
@@ -250,7 +251,7 @@ private struct QueueItemInfoList: View {
             if let playlist = item.playlistProgressLabel {
                 LabeledContent("Playlist", value: playlist)
             }
-            if let warning = MissingFiles.warning(missing: files.count - existingFiles.count, of: files.count) {
+            if item.checkedOutputURLs != nil, let warning = MissingFiles.warning(missing: files.count - existingFiles.count, of: files.count) {
                 WarningRow(message: warning)
             }
         } header: {

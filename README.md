@@ -85,7 +85,10 @@ kept in their original formats and are not automatically saved to Photos.
 - Distinct phases: downloading, merging, extracting audio, embedding artwork, writing metadata,
   removing segments, finishing up
 - Cancel, retry, remove, clear finished, reveal in Finder
-- An expandable raw log per item, with filtering and copy
+- An expandable log per item, with filtering and copy
+- On Mac, unfinished jobs appear in Queue after relaunch. Choose **Resume** to continue.
+  Turn on **Show queue in menu bar** in Settings to keep downloads running after closing the window.
+- On iPhone, tap the active download above the tab bar to open Queue without losing a draft.
 
 ### Advanced options
 
@@ -95,15 +98,14 @@ removal with per-category selection · playlist downloading with item ranges · 
 cookies from browser · rate limit · parallel fragments · proxy · user agent · ASCII-only
 filenames · overwrite behaviour · and a free-form field for any other yt-dlp argument.
 
-A **command preview** shows the exact command before it runs, and it is generated from the same
-argument array that is handed to the process — not a reconstruction.
+The **command preview** uses the process argument list and masks credentials for display and copying.
 
 ### History
 
-Every finished download is recorded locally with its title, source URL, output path, date,
-format and outcome. Search it, reveal the file in Finder, copy the original URL, or download it
-again with the exact options used the first time. Entries whose file has since moved are
-flagged.
+History records the final files, size, date and outcome of each download. Reveal surviving
+playlist files together in Finder. History lists up to 500 files per entry and shows the total
+when a collection exceeds that limit. Saved options omit credentials and identify what to
+re-enter for a repeat download.
 
 ### Dependency management
 
@@ -273,11 +275,12 @@ saved to Photos automatically (**Settings › Downloads**).
 ### Links from other apps
 
 - **Share sheet** — share a page or video to **YTDLP GUI** and choose Download Video, Download
-  Audio or Add. The links wait in a shared inbox and are picked up the next time the app opens.
+  Audio, Download Gallery or Add. Shared links stay in the inbox until saved to Queue or a draft.
+  If you are already editing a link, choose **Append Links** or leave the share for later.
   The inbox needs an App Group; builds without one (see [Signing](#signing)) offer **Copy Link**
   instead.
-- **Shortcuts and Siri** — the **Download with YTDLP GUI** action takes a link and Video or
-  Audio, and starts the download.
+- **Shortcuts and Siri** — the **Download with YTDLP GUI** action takes a link and a choice of Video,
+  Audio or Gallery. Leave the choice empty to use your last settings.
 - **URL scheme** — `ytdlpgui://download?url=<percent-encoded URL>&kind=video|audio` fills in the
   Download screen. It never starts a download by itself, so a web page can't.
 

@@ -138,10 +138,4 @@ extension DownloadItem {
         return parts.joined(separator: ", ")
     }
 
-    /// Every finished file still where the download left it, in the order they were finished.
-    var existingOutputURLs: [URL] {
-        guard state == .completed else { return [] }
-        let files = outputURLs.isEmpty ? outputURL.map { [$0] } ?? [] : outputURLs
-        return files.filter { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
-    }
 }

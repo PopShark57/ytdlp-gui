@@ -123,6 +123,10 @@ final class AppSettings {
 
     // MARK: Interface
 
+    var showsQueueMenu: Bool {
+        didSet { defaults.set(showsQueueMenu, forKey: "showsQueueMenu") }
+    }
+
     var showCommandPreview: Bool {
         didSet { defaults.set(showCommandPreview, forKey: Key.showCommandPreview) }
     }
@@ -155,6 +159,7 @@ final class AppSettings {
         ytdlpPathOverride = defaults.string(forKey: Key.ytdlpPath) ?? ""
         galleryDLPathOverride = defaults.string(forKey: "galleryDLPath") ?? ""
         ffmpegPathOverride = defaults.string(forKey: Key.ffmpegPath) ?? ""
+        showsQueueMenu = defaults.bool(forKey: "showsQueueMenu")
         showCommandPreview = defaults.object(forKey: Key.showCommandPreview) as? Bool ?? false
         confirmBeforeClearingHistory = defaults.object(forKey: Key.confirmBeforeClearingHistory) as? Bool ?? true
 
@@ -191,6 +196,7 @@ final class AppSettings {
         notifyWhenComplete = true
         playSoundWhenComplete = true
         appearance = .system
+        showsQueueMenu = false
         showCommandPreview = false
         confirmBeforeClearingHistory = true
         storedOptions = DownloadOptions()

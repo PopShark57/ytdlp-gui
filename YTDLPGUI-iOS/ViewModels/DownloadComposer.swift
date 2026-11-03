@@ -25,9 +25,11 @@ final class DownloadComposer {
         var isAnalyzing: Bool { self == .analyzing }
     }
 
+    @ObservationIgnored var draftDidChange: ((String) -> Void)?
     var urlText: String = "" {
         didSet {
             guard urlText != oldValue else { return }
+            draftDidChange?(urlText)
             detectedURLs = URLDetection.urlsFromLines(urlText)
             analyzeWhenReady = false
             // Any previous analysis describes a different link now.

@@ -6,6 +6,12 @@ struct SharedLink: Equatable, Sendable {
     var urls: [String]
     var kind: DownloadKind?
     var created: Date
+    var isGallery = false
+    var inboxFile: URL?
+
+    func acknowledge() throws {
+        if let inboxFile { try FileManager.default.removeItem(at: inboxFile) }
+    }
 }
 
 /// Reads the links the Share extension leaves in the App Group container.
@@ -29,7 +35,7 @@ enum SharedLinkInbox {
 
     private static let logger = AppLog.shareInbox
 
-    /// Reads and deletes every pending entry, oldest first. Unreadable entries are deleted and skipped.
+    /// Reads pending entries oldest first. Valid files stay until the receiver acknowledges them.
     static func drain() -> [SharedLink] {
         guard let directory = ShareInboxFormat.inboxDirectory else {
             logger.error("The App Group container is unavailable; links from the Share extension can't be read.")
@@ -63,22 +69,15 @@ enum SharedLinkInbox {
                 try readEntry(at: fileURL, fileSize: values.fileSize ?? 0)
             }
 
-            do {
-                try fileManager.removeItem(at: fileURL)
-            } catch {
-                // Acting on an entry that can't be deleted would act on it again at every
-                // launch, so it is left alone; the next drain tries again.
-                logger.error("Couldn't delete inbox entry \(fileName, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                continue
-            }
-
             switch result {
-            case .success(let link) where now.timeIntervalSince(link.created) > maximumAge:
-                logger.notice("Dropped inbox entry \(fileName, privacy: .public): older than a week.")
-            case .success(let link):
+            case .success(var link) where now.timeIntervalSince(link.created) <= maximumAge:
+                link.inboxFile = fileURL
                 pending.append((fileName, link))
-            case .failure(let error):
-                logger.error("Dropped inbox entry \(fileName, privacy: .public): \(error.description, privacy: .public)")
+            case .failure(.unreadable):
+                continue // Protected data or a transient read failure. Retry on foreground.
+            default:
+                do { try fileManager.removeItem(at: fileURL) }
+                catch { logger.error("Could not remove invalid inbox entry: \(error.localizedDescription)") }
             }
         }
 
@@ -139,7 +138,8 @@ enum SharedLinkInbox {
         return SharedLink(
             urls: urls,
             kind: entry.kind.flatMap(DownloadKind.init(rawValue:)),
-            created: created
+            created: created,
+            isGallery: entry.kind == "gallery"
         )
     }
 

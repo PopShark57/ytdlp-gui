@@ -303,9 +303,11 @@ can be disabled (a setting), so the screen doesn't lock mid-download.
 ### Links from elsewhere
 
 - **Share sheet** — the Share extension writes each shared link to the App Group inbox as
-  `Inbox/<timestamp>-<uuid>.json`: `{"version": 1, "urls": [str], "kind": "video"|"audio"|null,
-  "created": ISO-8601}`. When the app becomes active it drains the inbox: links with a `kind` are
-  queued straight away with the last-used options; links without one are put in the URL field.
+  `Inbox/<timestamp>-<uuid>.json`: `{"version": 1, "urls": [str], "kind": "video"|"audio"|"gallery"|null,
+  "created": ISO-8601}`. On activation the app records explicit download requests together with their
+  inbox receipt in an atomic queue snapshot before starting them. Add-to-composer shares are
+  acknowledged after the draft is written. An occupied draft offers Append or Later.
+  Reading the same file after a crash does not repeat the handoff.
   The format lives in `ShareInbox/ShareInboxFormat.swift`, a folder both targets compile, so the
   writer (`InboxWriter`) and the reader (`SharedLinkInbox`) share one definition.
 - **URL scheme** — `ytdlpgui://download?url=<percent-encoded>&kind=video|audio` fills in the
