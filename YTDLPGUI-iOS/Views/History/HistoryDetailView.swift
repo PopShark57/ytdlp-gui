@@ -44,14 +44,16 @@ struct HistoryDetailView: View {
             retainedEntry = model.history.entries.first { $0.id == entryID }
         }
         .task(id: existingFiles) {
-            photoFiles = await MediaLibrary.photosCompatibleFiles(among: existingFiles)
+            let compatible = await MediaLibrary.photosCompatibleFiles(among: existingFiles)
+            guard !Task.isCancelled else { return }
+            photoFiles = compatible
         }
     }
 
     private func list(for entry: HistoryEntry) -> some View {
-        let files = entry.outputURLs
         let status = model.history.fileStatus[entry.id]
-        let existingFiles = status?.existingURLs ?? []
+        let files = status?.resolvedURLs ?? []
+        let present = Set(status?.existingURLs ?? [])
         return List {
             Section {
                 header(for: entry)
@@ -111,7 +113,7 @@ struct HistoryDetailView: View {
             if files.count > 1 {
                 Section("Files (\(files.count))") {
                     ForEach(files, id: \.self) { file in
-                        FileNameRow(url: file, isMissing: status != nil && !existingFiles.contains(file))
+                        FileNameRow(url: file, isMissing: status != nil && !present.contains(file))
                     }
                 }
                 .listRowBackground(MobileTheme.surface)

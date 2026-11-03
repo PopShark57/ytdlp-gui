@@ -80,6 +80,8 @@ final class DownloadQueue {
     private let notifications: NotificationService
     private let library: MediaLibrary
     private let resolver: DownloadOptionsResolver
+    private var shareReceipts = Set<String>()
+    private var restoredQueue = false
     private let store: QueueStore
     private let logger = AppLog.queue
 
@@ -151,6 +153,12 @@ final class DownloadQueue {
     /// are replaced with this install's own.
     @discardableResult
     func enqueue(url: String, options: DownloadOptions, info: MediaInfo? = nil) -> EnqueueOutcome {
+        let outcome = append(url: url, options: options, info: info)
+        if outcome.addedItem != nil { queueDidChange() }
+        return outcome
+    }
+
+    private func append(url: String, options: DownloadOptions, info: MediaInfo? = nil) -> EnqueueOutcome {
         let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
         if let pending = pendingItem(forURL: url) {
             return .alreadyPending(pending)
@@ -168,7 +176,6 @@ final class DownloadQueue {
         )
         items.append(item)
         logger.info("Queued \(item.id.uuidString, privacy: .public): \(url, privacy: .private)")
-        queueDidChange()
         return .added(item)
     }
 
@@ -639,6 +646,7 @@ final class DownloadQueue {
             completedSinceIdle += 1
         }
 
+        item.refreshFileAvailability()
         var entry = item.makeHistoryEntry()
         // History outlives the download and is included in device backups, so passwords and
         // other credentials stay out of it. The item keeps them, so a retry still works.
@@ -747,9 +755,7 @@ final class DownloadQueue {
         Task { [weak self, library] in
             var outcome = PhotoSaveState.saved
             do {
-                for file in files {
-                    try await library.saveToPhotos(file)
-                }
+                try await library.saveToPhotos(files)
             } catch {
                 outcome = .failed(error.localizedDescription)
             }
@@ -787,6 +793,9 @@ final class DownloadQueue {
     /// why. They aren't restarted automatically: the person may have left for a reason, and
     /// retrying resumes from the partial file anyway.
     func restoreUnfinishedItems() {
+        guard !restoredQueue else { return }
+        restoredQueue = true
+        shareReceipts = store.receipts()
         let known = Set(items.map(\.id))
         let restored = store.load()
             .filter { !known.contains($0.id) }
@@ -822,6 +831,31 @@ final class DownloadQueue {
         persistNow()
     }
 
+    /// Store the receipt and its jobs in the same atomic queue snapshot. Redelivery
+    /// after a crash can acknowledge the file even if its job has already finished.
+    func acceptShare(_ link: SharedLink, options: DownloadOptions) throws -> Int {
+        restoreUnfinishedItems()
+        let receipt = link.inboxFile?.lastPathComponent
+        var added: [DownloadItem] = []
+        if receipt.map({ !shareReceipts.contains($0) }) ?? true {
+            added = link.urls.compactMap { append(url: $0, options: options).addedItem }
+            if let receipt { shareReceipts.insert(receipt) }
+            guard persistNow() else {
+                let ids = Set(added.map(\.id))
+                items.removeAll { ids.contains($0.id) }
+                if let receipt { shareReceipts.remove(receipt) }
+                throw CocoaError(.fileWriteUnknown)
+            }
+            queueDidChange()
+        }
+        try link.acknowledge()
+        if let receipt {
+            shareReceipts.remove(receipt)
+            schedulePersist()
+        }
+        return added.count
+    }
+
     /// Coalesces bursts of changes (a playlist of links, a cancel-all) into one write.
     private func schedulePersist() {
         persistTask?.cancel()
@@ -832,7 +866,8 @@ final class DownloadQueue {
         }
     }
 
-    private func persistNow() {
+    @discardableResult
+    private func persistNow() -> Bool {
         let unfinished = items
             .filter { !$0.state.isFinished || resumableIDs.contains($0.id) }
             .map { item in
@@ -849,6 +884,6 @@ final class DownloadQueue {
                     createdAt: item.createdAt
                 )
             }
-        store.save(unfinished)
+        return store.save(unfinished, receipts: shareReceipts)
     }
 }

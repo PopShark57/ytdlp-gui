@@ -20,7 +20,7 @@ struct ProcessConfiguration: Sendable {
     var displayCommand: String {
         ShellQuoting.commandLine(
             executable: executableURL.path(percentEncoded: false),
-            arguments: arguments
+            arguments: ShellQuoting.redactingSecrets(arguments)
         )
     }
 }

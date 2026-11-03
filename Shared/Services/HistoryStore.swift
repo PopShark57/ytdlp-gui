@@ -6,6 +6,7 @@ import os
 struct HistoryFileStatus: Equatable, Sendable {
     /// The entry's files that still exist, found again under the current container where needed
     /// (see `HistoryEntry.outputURLs`), in the order they were downloaded.
+    var resolvedURLs: [URL] = []
     var existingURLs: [URL]
     /// How many files the entry recorded.
     var recordedCount: Int
@@ -38,6 +39,7 @@ final class HistoryStore {
 
     private let fileURL: URL
     private let logger = AppLog.history
+    @ObservationIgnored private var fileCheckGeneration = 0
     private var saveTask: Task<Void, Never>?
 
     /// Older entries beyond this count are dropped on save.
@@ -99,12 +101,11 @@ final class HistoryStore {
         scheduleSave()
     }
 
-    /// Drops successful entries none of whose files exists any more. Uses `fileStatus`, and
-    /// looks on disk for an entry that hasn't been checked yet.
+    /// Drops fully indexed successful entries whose last availability check found no files.
     func removeMissingFiles() {
         entries.removeAll { entry in
             guard entry.succeeded else { return false }
-            return fileStatus[entry.id]?.isMissing ?? !entry.fileExists
+            return fileStatus[entry.id]?.isMissing == true && entry.fileListNotice == nil
         }
         entriesDidChange()
     }
@@ -124,16 +125,18 @@ final class HistoryStore {
 
     /// Checks every entry's files again, off the main actor.
     func refreshFileStatus() {
+        fileCheckGeneration += 1
         checkFiles(of: entries)
     }
 
     private func checkFiles(of entriesToCheck: [HistoryEntry]) {
         guard !entriesToCheck.isEmpty else { return }
+        let generation = fileCheckGeneration
         Task { [weak self] in
             let statuses = await Task.detached(priority: .utility) {
                 HistoryStore.fileStatuses(of: entriesToCheck)
             }.value
-            guard let self else { return }
+            guard let self, self.fileCheckGeneration == generation else { return }
             // Merged, so a check of one new entry and a check of them all can finish in either
             // order; entries removed meanwhile are left out.
             let current = Set(self.entries.map(\.id))
@@ -149,7 +152,7 @@ final class HistoryStore {
         for entry in entries {
             let files = entry.outputURLs
             let existing = files.filter { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
-            statuses[entry.id] = HistoryFileStatus(existingURLs: existing, recordedCount: files.count)
+            statuses[entry.id] = HistoryFileStatus(resolvedURLs: files, existingURLs: existing, recordedCount: files.count)
         }
         return statuses
     }
@@ -162,7 +165,7 @@ final class HistoryStore {
     }
 
     private func updateHasMissingFiles() {
-        let hasMissing = entries.contains { isFileMissing($0) }
+        let hasMissing = entries.contains { $0.fileListNotice == nil && isFileMissing($0) }
         if hasMissing != hasMissingFiles { hasMissingFiles = hasMissing }
     }
 

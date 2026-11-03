@@ -39,6 +39,20 @@ struct QueueStore: Sendable {
             .appending(path: "queue.json")
     }
 
+    private struct Snapshot: Codable {
+        var receipts: Set<String>
+        var downloads: [PersistedDownload]
+    }
+
+    func receipts() -> Set<String> {
+        guard let data = try? Data(contentsOf: fileURL),
+              let receipt = try? JSONDecoder().decode(ReceiptHeader.self, from: data) else { return [] }
+        return receipt.receipts
+    }
+
+    private struct ReceiptHeader: Decodable { var receipts: Set<String> }
+    private struct RestoredSnapshot: Decodable { var downloads: [Lossy<PersistedDownload>] }
+
     /// Reads whatever can be read. An entry that no longer decodes is skipped rather than
     /// discarding the others with it.
     func load() -> [PersistedDownload] {
@@ -47,6 +61,9 @@ struct QueueStore: Sendable {
             let data = try Data(contentsOf: fileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
+            if let snapshot = try? decoder.decode(RestoredSnapshot.self, from: data) {
+                return snapshot.downloads.compactMap(\.value)
+            }
             return try decoder.decode([Lossy<PersistedDownload>].self, from: data).compactMap(\.value)
         } catch {
             Self.logger.error("Couldn't read the saved queue: \(error.localizedDescription, privacy: .public)")
@@ -55,13 +72,14 @@ struct QueueStore: Sendable {
     }
 
     /// Writes the list, or removes the file when there is nothing left to remember.
-    func save(_ downloads: [PersistedDownload]) {
+    @discardableResult
+    func save(_ downloads: [PersistedDownload], receipts: Set<String> = []) -> Bool {
         do {
-            if downloads.isEmpty {
+            if downloads.isEmpty && receipts.isEmpty {
                 if FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) {
                     try FileManager.default.removeItem(at: fileURL)
                 }
-                return
+                return true
             }
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),
@@ -70,7 +88,8 @@ struct QueueStore: Sendable {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
-            try encoder.encode(downloads).write(to: fileURL, options: .atomic)
+            let data = receipts.isEmpty ? try encoder.encode(downloads) : try encoder.encode(Snapshot(receipts: receipts, downloads: downloads))
+            try data.write(to: fileURL, options: .atomic)
             // The saved options can hold passwords, which interrupted downloads need to resume.
             // The file only matters until they finish, so it stays out of device backups. An
             // atomic write replaces the file, which clears the flag, so it is set every time.
@@ -78,8 +97,10 @@ struct QueueStore: Sendable {
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             try? savedURL.setResourceValues(values)
+            return true
         } catch {
             Self.logger.error("Couldn't save the queue: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 }

@@ -95,9 +95,7 @@ struct YTDLPService: Sendable {
     func previewCommand(url: String, options: DownloadOptions) -> String {
         ShellQuoting.commandLine(
             executable: executableURL.path(percentEncoded: false),
-            arguments: backend == .galleryDL
-                ? ShellQuoting.redactingSecrets(downloadArguments(url: url, options: options))
-                : downloadArguments(url: url, options: options)
+            arguments: ShellQuoting.redactingSecrets(downloadArguments(url: url, options: options))
         )
     }
 

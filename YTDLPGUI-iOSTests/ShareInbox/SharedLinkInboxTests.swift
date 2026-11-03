@@ -63,9 +63,11 @@ final class SharedLinkInboxTests {
             SharedLink(
                 urls: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://youtu.be/abc"],
                 kind: .audio,
-                created: created
+                created: created,
+                inboxFile: directory.appending(path: "20260920T101500.250Z-6F9619FF-8B86-D011-B42D-00C04FC964FF.json")
             ),
         ])
+        for link in links { try link.acknowledge() }
         #expect(try remainingFiles().isEmpty)
     }
 
@@ -149,6 +151,7 @@ final class SharedLinkInboxTests {
         let links = SharedLinkInbox.drain(from: directory, now: now)
 
         #expect(links.map(\.urls) == [["https://example.com/good"]])
+        for link in links { try link.acknowledge() }
         #expect(try remainingFiles().isEmpty)
     }
 
@@ -179,7 +182,10 @@ final class SharedLinkInboxTests {
     @Test("Draining twice doesn't hand the same links over again")
     func drainIsDestructive() throws {
         try writeEntry(urls: ["https://example.com/once"], kind: nil, created: now)
-        #expect(SharedLinkInbox.drain(from: directory, now: now).count == 1)
+        let pending = SharedLinkInbox.drain(from: directory, now: now)
+        #expect(pending.count == 1)
+        #expect(SharedLinkInbox.drain(from: directory, now: now) == pending)
+        try pending.first?.acknowledge()
         #expect(SharedLinkInbox.drain(from: directory, now: now).isEmpty)
     }
 
@@ -230,6 +236,7 @@ final class SharedLinkInboxTests {
         let links = SharedLinkInbox.drain(from: directory, now: now)
 
         #expect(links.map(\.urls) == [["https://example.com/fresh"]])
+        for link in links { try link.acknowledge() }
         #expect(try remainingFiles().isEmpty)
     }
 

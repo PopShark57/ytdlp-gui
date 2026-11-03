@@ -2,10 +2,11 @@ import Foundation
 
 /// What the user asked the app to do with the shared links.
 ///
-/// The raw values are the app's `DownloadKind` raw values, which is what the inbox stores.
+/// The inbox stores these stable strings for the receiving app.
 enum ShareDownloadKind: String, Sendable {
     case video
     case audio
+    case gallery
 }
 
 /// Hands shared links to the app by leaving a small JSON file in the App Group inbox.

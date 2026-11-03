@@ -8,6 +8,7 @@ import Foundation
 enum ArgumentBuilder {
 
     /// Marker prefixed to machine-readable download progress lines.
+    static let finalPathMarker = "@@YTDLPGUI-FILE@@"
     static let progressMarker = "@@YTDLPGUI-DL@@"
     /// Marker prefixed to machine-readable post-processing lines.
     static let postProcessMarker = "@@YTDLPGUI-PP@@"
@@ -58,6 +59,7 @@ enum ArgumentBuilder {
         arguments += ["--newline", "--color", "never"]
         arguments += ["--progress", "--progress-template", downloadProgressTemplate]
         arguments += ["--progress-template", postProcessTemplate]
+        arguments += ["--no-simulate", "--print", "after_move:" + finalPathMarker + "%(filepath)j"]
 
         arguments += configurationArguments(for: options)
 

@@ -45,6 +45,7 @@ final class DownloadComposer {
     /// Shown as a transient banner, e.g. after adding several URLs at once.
     private(set) var statusMessage: String?
 
+    var editingInterrupted: DownloadQueue.Interrupted?
     private var analyzedURL: String?
     private var analysisTask: Task<Void, Never>?
     private var statusMessageTask: Task<Void, Never>?
@@ -229,7 +230,15 @@ final class DownloadComposer {
         let urls = detectedURLs
         options.outputDirectory = options.outputDirectory.standardizedFileURL
 
-        if urls.count == 1, let info = analysis.info, info.originalURL == urls[0] {
+        if urls.count == 1, let existing = queue.pendingItem(for: urls[0]) {
+            showStatus("Already in the queue: \(existing.displayTitle)")
+            return false
+        }
+        if let saved = editingInterrupted, urls == [saved.url] {
+            queue.enqueue(url: saved.url, options: options, resuming: saved.id)
+            editingInterrupted = nil
+            showStatus("Resumed “\(saved.title)”.")
+        } else if urls.count == 1, let info = analysis.info, info.originalURL == urls[0] {
             queue.enqueue(url: urls[0], options: options, info: info)
             showStatus("Added “\(info.title)” to the queue.")
         } else {

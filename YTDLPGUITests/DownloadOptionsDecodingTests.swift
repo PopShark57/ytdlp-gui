@@ -223,7 +223,23 @@ struct DownloadOptionsDecodingTests {
         let decoded = try decoder.decode(HistoryEntry.self, from: encoder.encode(entry))
         #expect(decoded.downloadID == downloadID)
         #expect(decoded.outputPaths == entry.outputPaths)
+        #expect(decoded.totalOutputCount == paths.count)
+        #expect(decoded.fileListNotice != nil)
         #expect(decoded.removedSecretOptions == ["--password"])
         #expect(decoded.outputURLs.count == HistoryEntry.maximumStoredOutputPaths)
     }
+    @Test("History states the scope of large file actions", arguments: [499, 500, 501])
+    func truncationBoundary(count: Int) throws {
+        let entry = HistoryEntry(title: "Gallery", sourceURL: "https://example.com/gallery",
+                                 outputPaths: (0..<count).map { "/out/\($0).jpg" },
+                                 formatSummary: "Gallery", kind: .video, succeeded: true)
+        let decoded = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(entry))
+        #expect(decoded.totalOutputCount == count)
+        #expect(decoded.outputPaths?.count == min(500, count))
+        #expect((decoded.fileListNotice != nil) == (count > 500))
+        var legacy = decoded
+        legacy.totalOutputCount = nil
+        #expect((legacy.fileListNotice != nil) == (count >= 500))
+    }
+
 }

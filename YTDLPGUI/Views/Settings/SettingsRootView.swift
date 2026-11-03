@@ -144,6 +144,10 @@ struct AppearanceSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Menu bar") {
+                Toggle("Show queue in menu bar and keep downloading when the window closes", isOn: $settings.showsQueueMenu)
+            }
+
             Section("Download screen") {
                 Toggle("Show the command preview by default", isOn: $settings.showCommandPreview)
                     .help("Expands the panel that shows the yt-dlp command before it runs")

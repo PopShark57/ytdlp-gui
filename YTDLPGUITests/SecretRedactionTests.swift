@@ -10,6 +10,25 @@ struct SecretRedactionTests {
 
     private let hidden = ShellQuoting.redactedPlaceholder
 
+    @Test("Mac service masks command previews and logged commands while keeping real process arguments")
+    func macCommandBoundary() {
+        let service = YTDLPService(executableURL: URL(fileURLWithPath: "/tmp/yt-dlp"), ffmpegURL: nil)
+        var options = DownloadOptions()
+        options.proxy = "https://user:sentinel123@proxy.test"
+        options.customArguments = "--add-headers 'Authorization:Bearer sentinel456'"
+        let url = "https://example.com/clip"
+        let configuration = service.makeDownloadSession(url: url, options: options).configuration
+        for command in [service.previewCommand(url: url, options: options), configuration.displayCommand] {
+            #expect(!command.contains("sentinel123") && !command.contains("sentinel456"))
+            #expect(command.contains(ShellQuoting.redactedPlaceholder))
+        }
+        let diagnostic = ShellQuoting.sanitizedLogLine("proxy sentinel123, token sentinel456",
+                                                      secrets: ShellQuoting.logRedactions(in: configuration.arguments))
+        #expect(diagnostic == "proxy PRIVATE, token PRIVATE")
+        #expect(configuration.arguments.contains(options.proxy))
+        #expect(configuration.arguments.contains("Authorization:Bearer sentinel456"))
+    }
+
     // MARK: - Redaction for display
 
     @Test("Passwords, user names and codes are masked in every spelling")

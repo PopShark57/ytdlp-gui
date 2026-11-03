@@ -139,9 +139,9 @@ struct QueueRowView: View {
 
     private var actionButtons: some View {
         HStack(spacing: 4) {
-            if item.canRevealInFinder, let url = item.outputURL {
+            if !item.existingOutputURLs.isEmpty {
                 iconButton("Reveal in Finder", "magnifyingglass") {
-                    FinderIntegration.reveal(item.outputURLs.isEmpty ? [url] : item.outputURLs)
+                    FinderIntegration.reveal(item.existingOutputURLs)
                 }
             }
             if item.canRetry {
@@ -157,10 +157,8 @@ struct QueueRowView: View {
             iconButton("Show log", "text.alignleft") {
                 model.showLog(for: item)
             }
-            if item.state != .active {
-                iconButton("Remove", "xmark") {
-                    model.queue.remove(item)
-                }
+            iconButton("Remove", "xmark") {
+                model.queue.remove(item)
             }
         }
     }

@@ -4,7 +4,7 @@ import Foundation
 /// App Group container's `Inbox` folder.
 ///
 /// - `Inbox/<ISO-8601 basic timestamp>-<UUID>.json`, so names sort chronologically;
-/// - `{"version": 1, "urls": [String], "kind": "video"|"audio"|null, "created": ISO-8601}`.
+/// - `{"version": 1, "urls": [String], "kind": "video"|"audio"|"gallery"|null, "created": ISO-8601}`.
 ///
 /// The `ShareInbox` folder is compiled into both the app and the extension (an extension can't
 /// link the app's code, but it can compile the same source file), so the writer

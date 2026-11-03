@@ -11,13 +11,21 @@ struct QueueView: View {
 
     var body: some View {
         Group {
-            if queue.items.isEmpty {
+            if queue.items.isEmpty && queue.interrupted.isEmpty {
                 emptyState
             } else {
                 list
             }
         }
         .navigationTitle("Queue")
+        .safeAreaInset(edge: .top) {
+            if let notice = queue.notice {
+                HStack {
+                    Text(notice)
+                    Button("Dismiss") { queue.notice = nil }
+                }.padding(6)
+            }
+        }
         .toolbar { toolbarContent }
         .inspector(isPresented: $showInspector) {
             inspectorContent
@@ -38,6 +46,18 @@ struct QueueView: View {
 
     private var list: some View {
         List(selection: $selection) {
+            if !queue.interrupted.isEmpty {
+                Section("Unfinished from last session") {
+                    ForEach(queue.interrupted) { saved in
+                        HStack {
+                            Text(saved.title).lineLimit(1)
+                            Spacer()
+                            Button("Resume") { model.resume(saved) }
+                            Button("Discard") { queue.forgetInterrupted(saved.id) }
+                        }
+                    }
+                }
+            }
             ForEach(queue.items) { item in
                 QueueRowView(item: item)
                     .tag(item.id)
@@ -121,8 +141,9 @@ struct QueueView: View {
 
     @ViewBuilder
     private func contextMenu(for item: DownloadItem) -> some View {
-        if item.canRevealInFinder, let url = item.outputURL {
-            Button("Reveal in Finder") { FinderIntegration.reveal(item.outputURLs.isEmpty ? [url] : item.outputURLs) }
+        let files = item.existingOutputURLs
+        if let url = files.first {
+            Button("Reveal in Finder") { FinderIntegration.reveal(files) }
             Button("Open") { FinderIntegration.open(url) }
             Divider()
         }
@@ -147,6 +168,5 @@ struct QueueView: View {
             Button("Retry") { queue.retry(item) }
         }
         Button("Remove from Queue", role: .destructive) { queue.remove(item) }
-            .disabled(item.state == .active)
     }
 }

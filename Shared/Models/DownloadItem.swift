@@ -74,6 +74,23 @@ final class DownloadItem: Identifiable {
     /// playlist, or a video and the audio track kept beside it when the two couldn't be merged.
     /// Empty when only `outputURL` is known.
     var outputURLs: [URL] = []
+    private(set) var checkedOutputURLs: [URL]?
+    var existingOutputURLs: [URL] { checkedOutputURLs ?? [] }
+    @ObservationIgnored private var availabilityTask: Task<Void, Never>?
+
+    func refreshFileAvailability() {
+        availabilityTask?.cancel()
+        guard state == .completed else { checkedOutputURLs = nil; return }
+        let files = outputURLs.isEmpty ? outputURL.map { [$0] } ?? [] : outputURLs
+        availabilityTask = Task {
+            let present = await Task.detached(priority: .utility) {
+                files.filter { FileManager.default.fileExists(atPath: $0.path) }
+            }.value
+            guard !Task.isCancelled else { return }
+            checkedOutputURLs = present
+        }
+    }
+
     var completedFileSize: Int64?
     var finishedAt: Date?
 
@@ -124,11 +141,11 @@ final class DownloadItem: Identifiable {
 
     var canCancel: Bool { state == .active || state == .queued }
     var canRetry: Bool { state == .failed || state == .cancelled }
-    var canRevealInFinder: Bool { state == .completed && outputURL != nil }
 
     /// Resets everything except identity, so the item can be run again.
     func prepareForRetry() {
         state = .queued
+        refreshFileAvailability()
         phase = .waiting
         progress = .empty
         failure = nil

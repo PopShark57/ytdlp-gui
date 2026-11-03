@@ -619,6 +619,23 @@ struct DownloadQueueTests {
         #expect(!FileManager.default.fileExists(atPath: env.queueStoreURL.path(percentEncoded: false)))
     }
 
+    @Test("A redelivered share is acknowledged once across a queue restore")
+    func recoverDelivery() throws {
+        let env = try AppTestEnvironment()
+        let file = env.root.appending(path: "delivery.json")
+        let share = SharedLink(urls: [url], kind: .video, created: Date(), inboxFile: file)
+        // Missing here simulates an acknowledgement failure after a successful save.
+        #expect(throws: (any Error).self) { try env.queue.acceptShare(share, options: DownloadOptions()) }
+        let store = QueueStore(fileURL: env.queueStoreURL)
+        #expect(store.receipts() == [file.lastPathComponent])
+        let original = try #require(store.load().first)
+        try Data().write(to: file)
+        let restored = env.makeRelaunchedQueue()
+        #expect(try restored.acceptShare(share, options: DownloadOptions()) == 0)
+        #expect(restored.items.map(\.id) == [original.id])
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
     @Test("A saved entry that no longer decodes doesn't take the others with it")
     func lenientQueueFile() throws {
         let env = try AppTestEnvironment()

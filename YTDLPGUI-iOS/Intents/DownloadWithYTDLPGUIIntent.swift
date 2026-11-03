@@ -5,18 +5,21 @@ import Foundation
 enum ShortcutDownloadKind: String, AppEnum {
     case video
     case audio
+    case gallery
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Download Type"
 
     static let caseDisplayRepresentations: [ShortcutDownloadKind: DisplayRepresentation] = [
         .video: DisplayRepresentation(title: "Video", image: .init(systemName: "film")),
+        .gallery: DisplayRepresentation(title: "Gallery", image: .init(systemName: "photo.stack")),
         .audio: DisplayRepresentation(title: "Audio", image: .init(systemName: "music.note")),
     ]
 
-    var downloadKind: DownloadKind {
+    var downloadKind: DownloadKind? {
         switch self {
         case .video: .video
         case .audio: .audio
+        case .gallery: nil
         }
     }
 }
@@ -47,7 +50,7 @@ struct DownloadWithYTDLPGUIIntent: AppIntent {
 
     @Parameter(
         title: "Download As",
-        description: "Video, or only its audio. Leave empty to use the type you downloaded last."
+        description: "Video, audio or a gallery. Leave empty to use the type you downloaded last."
     )
     var kind: ShortcutDownloadKind?
 
@@ -63,7 +66,7 @@ struct DownloadWithYTDLPGUIIntent: AppIntent {
         guard URLDetection.isLikelyMediaURL(link) else {
             throw DownloadIntentError.notAWebLink
         }
-        let added = model.enqueueFromShortcut(url: link, kind: kind?.downloadKind)
+        let added = model.enqueueFromShortcut(url: link, kind: kind?.downloadKind, gallery: kind == .gallery)
         return .result(dialog: added
             ? "Added to the YTDLP GUI queue."
             : "That link is already in the YTDLP GUI queue.")

@@ -69,6 +69,7 @@ final class AppearanceUITests: XCTestCase {
         let app = XCUIApplication()
         // Argument-domain overrides leave the user's stored preferences intact.
         app.launchArguments = [
+            "-isolatedAppearanceTests",
             "-appearanceMode", appearance,
             "-autoAnalyzePastedURLs", "NO",
             "-suggestClipboardLinks", "NO",
