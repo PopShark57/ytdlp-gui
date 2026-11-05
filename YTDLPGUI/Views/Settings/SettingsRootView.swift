@@ -73,6 +73,9 @@ struct GeneralSettingsView: View {
                 .pickerStyle(.menu)
                 .frame(maxWidth: 220)
                 .help("How many downloads may run at the same time. More is not always faster, and some sites rate-limit.")
+
+                Toggle("Keep the Mac awake while downloading", isOn: $settings.preventsSleepWhileDownloading)
+                    .help("Stops the Mac from going to sleep on its own while downloads are running. The display can still turn off.")
             }
 
             Section("When a download finishes") {

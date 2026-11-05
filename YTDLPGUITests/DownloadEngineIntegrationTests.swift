@@ -332,6 +332,42 @@ struct DownloadEngineIntegrationTests {
         fixture.model.queue.cancelAll()
         _ = await wait(timeout: .seconds(30)) { !fixture.model.queue.isBusy }
     }
+
+    @Test("Waiting items can be moved to start next or last, and the running one stays put")
+    func reorderingWaitingItems() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+
+        await fixture.model.toolchain.refresh()
+        fixture.model.settings.maximumConcurrentDownloads = 1
+
+        var options = fixture.makeOptions()
+        options.rateLimit = "8K"
+        options.outputTemplate = "%(title)s-%(autonumber)s.%(ext)s"
+
+        let queue = fixture.model.queue
+        let running = queue.enqueue(url: fixture.sourceURL, options: options)
+        var waiting: [DownloadItem] = []
+        for name in ["B", "C", "D"] {
+            let url = fixture.root.appending(path: "\(name).mp4")
+            try FileManager.default.copyItem(at: fixture.clipURL, to: url)
+            waiting.append(queue.enqueue(url: url.absoluteString, options: options))
+        }
+        _ = await wait(timeout: .seconds(30)) { running.state == .active }
+
+        queue.startNext([waiting[2].id])
+        #expect(queue.items.map(\.id) == [running, waiting[2], waiting[0], waiting[1]].map(\.id))
+
+        queue.startLast([waiting[2].id, waiting[0].id])
+        #expect(queue.items.map(\.id) == [running, waiting[1], waiting[2], waiting[0]].map(\.id))
+
+        // Asking for the running item to move does nothing.
+        queue.startLast([running.id])
+        #expect(queue.items.first === running)
+
+        queue.cancelAll()
+        _ = await wait(timeout: .seconds(30)) { !queue.isBusy }
+    }
 }
 
 // MARK: - Support

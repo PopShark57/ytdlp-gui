@@ -110,6 +110,11 @@ final class DownloadQueue {
         saveUnfinished()
     }
 
+    func forgetAllInterrupted() {
+        interrupted.removeAll()
+        saveUnfinished()
+    }
+
     // MARK: - Adding
 
     /// Adds one URL to the queue.
@@ -219,6 +224,40 @@ final class DownloadQueue {
 
     func remove(ids: Set<DownloadItem.ID>) {
         for item in items where ids.contains(item.id) { remove(item) }
+    }
+
+    func item(withID id: DownloadItem.ID) -> DownloadItem? {
+        items.first { $0.id == id }
+    }
+
+    // MARK: - Order
+
+    /// Moves rows within the list. Only waiting items change the order in which work starts,
+    /// but the list keeps whatever order the user arranges.
+    func move(fromOffsets source: IndexSet, toOffset destination: Int) {
+        items.move(fromOffsets: source, toOffset: destination)
+        saveUnfinished()
+    }
+
+    /// Makes the given waiting items the next to start, keeping their relative order.
+    func startNext(_ ids: Set<DownloadItem.ID>) {
+        let moving = items.filter { ids.contains($0.id) && $0.state == .queued }
+        guard !moving.isEmpty else { return }
+        let movingIDs = Set(moving.map(\.id))
+        var remaining = items.filter { !movingIDs.contains($0.id) }
+        let insertion = remaining.firstIndex { $0.state == .queued } ?? remaining.endIndex
+        remaining.insert(contentsOf: moving, at: insertion)
+        items = remaining
+        saveUnfinished()
+    }
+
+    /// Sends the given waiting items to the back of the queue.
+    func startLast(_ ids: Set<DownloadItem.ID>) {
+        let moving = items.filter { ids.contains($0.id) && $0.state == .queued }
+        guard !moving.isEmpty else { return }
+        let movingIDs = Set(moving.map(\.id))
+        items = items.filter { !movingIDs.contains($0.id) } + moving
+        saveUnfinished()
     }
 
     func clearFinished() {
@@ -481,10 +520,12 @@ final class DownloadQueue {
             let title = item.displayTitle
             if let failure {
                 let reason = failure.title
-                Task { await notifications.notifyDownloadFailed(title: title, reason: reason, playSound: playSound) }
+                let id = item.id
+                Task { await notifications.notifyDownloadFailed(title: title, reason: reason, itemID: id, playSound: playSound) }
             } else {
                 let fileName = item.outputURL?.lastPathComponent
-                Task { await notifications.notifyDownloadCompleted(title: title, fileName: fileName, playSound: playSound) }
+                let files = item.outputURLs.isEmpty ? item.outputURL.map { [$0] } ?? [] : item.outputURLs
+                Task { await notifications.notifyDownloadCompleted(title: title, fileName: fileName, files: files, playSound: playSound) }
             }
         }
 

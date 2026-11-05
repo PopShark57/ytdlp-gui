@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
@@ -18,6 +19,10 @@ struct RootView: View {
         }
         .navigationTitle(model.selectedSection.title)
         .toolbar { toolbarContent }
+        .onAppear {
+            let openWindow = openWindow
+            model.openMainWindow = { openWindow(id: WindowID.main) }
+        }
     }
 
     // MARK: - Sidebar

@@ -53,8 +53,10 @@ private struct QueueMenu: View {
         Button("Open Queue") {
             model.selectedSection = .queue
             openWindow(id: WindowID.main)
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
         }
+        Button("Cancel All Downloads") { model.queue.cancelAll() }
+            .disabled(!model.queue.isBusy)
         Divider()
         Button("Quit YTDLP GUI") { NSApp.terminate(nil) }
     }

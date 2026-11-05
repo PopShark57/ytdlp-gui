@@ -1,3 +1,4 @@
+import QuickLook
 import SwiftUI
 
 /// Completed and failed downloads, persisted between launches.
@@ -8,6 +9,8 @@ struct HistoryView: View {
     @State private var selection = Set<HistoryEntry.ID>()
     @State private var filter: Filter = .all
     @State private var showClearConfirmation = false
+    @State private var previewURL: URL?
+    @State private var previewURLs: [URL] = []
 
     private enum Filter: String, CaseIterable, Identifiable {
         case all, completed, failed
@@ -51,6 +54,7 @@ struct HistoryView: View {
         } message: {
             Text("This removes \(history.entries.count) entries from the list. The downloaded files themselves are not deleted.")
         }
+        .quickLookPreview($previewURL, in: previewURLs)
         .safeAreaInset(edge: .top, spacing: 0) {
             if let error = history.storageError {
                 AdvisoryBanner(kind: .warning, title: error)
@@ -65,18 +69,42 @@ struct HistoryView: View {
     private var list: some View {
         List(selection: $selection) {
             ForEach(filteredEntries) { entry in
+                let files = history.existingFiles(of: entry)
                 HistoryRowView(entry: entry, status: history.fileStatus[entry.id])
                     .tag(entry.id)
-                    .contextMenu { contextMenu(for: entry) }
+                    .modifier(FileDragSource(url: files.last))
             }
         }
         .listStyle(.inset)
         .alternatingRowBackgrounds()
+        .contextMenu(forSelectionType: HistoryEntry.ID.self) { ids in
+            contextMenu(for: entries(for: ids))
+        } primaryAction: { ids in
+            // Double-click or Return: open what was downloaded, or retry what failed.
+            for entry in entries(for: ids) {
+                if let file = history.existingFiles(of: entry).last {
+                    FinderIntegration.open(file)
+                } else if !entry.succeeded {
+                    downloadAgain(entry)
+                }
+            }
+        }
         .onDeleteCommand {
             guard !selection.isEmpty else { return }
             history.remove(ids: selection)
             selection.removeAll()
         }
+        .onKeyPress(.space) {
+            let files = entries(for: selection).flatMap { history.existingFiles(of: $0) }
+            guard let first = files.first else { return .ignored }
+            previewURLs = files
+            previewURL = first
+            return .handled
+        }
+    }
+
+    private func entries(for ids: Set<HistoryEntry.ID>) -> [HistoryEntry] {
+        filteredEntries.filter { ids.contains($0.id) }
     }
 
     private var emptyState: some View {
@@ -132,11 +160,46 @@ struct HistoryView: View {
     // MARK: - Context menu
 
     @ViewBuilder
-    private func contextMenu(for entry: HistoryEntry) -> some View {
+    private func contextMenu(for chosen: [HistoryEntry]) -> some View {
+        if let entry = chosen.first, chosen.count == 1 {
+            singleEntryMenu(for: entry)
+        } else if !chosen.isEmpty {
+            let files = chosen.flatMap { history.existingFiles(of: $0) }
+            if !files.isEmpty {
+                Button("Reveal \(files.count) Files in Finder") { FinderIntegration.reveal(files) }
+                Button("Quick Look") {
+                    previewURLs = files
+                    previewURL = files.first
+                }
+                Divider()
+            }
+            Button("Copy \(chosen.count) Source URLs") {
+                Pasteboard.copy(chosen.map(\.sourceURL).joined(separator: "\n"))
+            }
+            Button("Download \(chosen.count) Again") {
+                chosen.forEach(downloadAgain)
+            }
+            Divider()
+            Button("Remove \(chosen.count) from History", role: .destructive) {
+                history.remove(ids: Set(chosen.map(\.id)))
+                selection.subtract(chosen.map(\.id))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func singleEntryMenu(for entry: HistoryEntry) -> some View {
         let files = history.existingFiles(of: entry)
-        if let url = files.first {
-            Button("Reveal in Finder") { FinderIntegration.reveal(files) }
+        if let url = files.last {
             Button("Open") { FinderIntegration.open(url) }
+            Button("Reveal in Finder") { FinderIntegration.reveal(files) }
+            Button("Quick Look") {
+                previewURLs = files
+                previewURL = files.first
+            }
+            ShareLink(items: files) {
+                Text("Share…")
+            }
             Divider()
         }
 
@@ -158,6 +221,7 @@ struct HistoryView: View {
 
         Button("Remove from History", role: .destructive) {
             history.remove(entry)
+            selection.remove(entry.id)
         }
     }
 
@@ -222,5 +286,21 @@ struct HistoryView: View {
             }
         }
         .filter { $0.matches(searchText: searchText) }
+    }
+}
+
+/// Lets a row's downloaded file be dragged out to Finder, Mail or any other app.
+struct FileDragSource: ViewModifier {
+    let url: URL?
+
+    func body(content: Content) -> some View {
+        if let url {
+            content.draggable(url) {
+                Label(url.lastPathComponent, systemImage: "doc")
+                    .padding(6)
+            }
+        } else {
+            content
+        }
     }
 }
