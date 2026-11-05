@@ -56,6 +56,7 @@ final class AppSettings {
         static let lastOptions = "lastDownloadOptions"
         static let showCommandPreview = "showCommandPreview"
         static let confirmBeforeClearingHistory = "confirmBeforeClearingHistory"
+        static let preventsSleep = "preventsSleepWhileDownloading"
     }
 
     private let defaults: UserDefaults
@@ -84,6 +85,11 @@ final class AppSettings {
     }
 
     static let concurrencyRange = 1...8
+
+    /// Keeps the Mac from idle-sleeping while a download is running.
+    var preventsSleepWhileDownloading: Bool {
+        didSet { defaults.set(preventsSleepWhileDownloading, forKey: Key.preventsSleep) }
+    }
 
     var revealWhenComplete: Bool {
         didSet { defaults.set(revealWhenComplete, forKey: Key.revealWhenComplete) }
@@ -152,6 +158,7 @@ final class AppSettings {
         readClipboardOnActivate = defaults.object(forKey: Key.readClipboard) as? Bool ?? false
         let storedConcurrency = defaults.object(forKey: Key.maximumConcurrentDownloads) as? Int ?? 2
         maximumConcurrentDownloads = storedConcurrency.constrained(to: Self.concurrencyRange)
+        preventsSleepWhileDownloading = defaults.object(forKey: Key.preventsSleep) as? Bool ?? true
         revealWhenComplete = defaults.object(forKey: Key.revealWhenComplete) as? Bool ?? false
         notifyWhenComplete = defaults.object(forKey: Key.notifyWhenComplete) as? Bool ?? true
         playSoundWhenComplete = defaults.object(forKey: Key.playSoundWhenComplete) as? Bool ?? true
@@ -192,6 +199,7 @@ final class AppSettings {
         autoAnalyzePastedURLs = true
         readClipboardOnActivate = false
         maximumConcurrentDownloads = 2
+        preventsSleepWhileDownloading = true
         revealWhenComplete = false
         notifyWhenComplete = true
         playSoundWhenComplete = true

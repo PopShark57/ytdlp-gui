@@ -42,6 +42,7 @@ final class AppModel {
     let notifications: NotificationService
     let queue: DownloadQueue
     let composer: DownloadComposer
+    let activityMonitor: QueueActivityMonitor
 
     var selectedSection: AppSection = .download
     /// Set when the user asks to see a specific queue item's log.
@@ -68,7 +69,15 @@ final class AppModel {
         self.notifications = notifications
         self.queue = queue
         self.composer = DownloadComposer(settings: settings, toolchain: toolchain, queue: queue)
+        self.activityMonitor = QueueActivityMonitor(queue: queue, settings: settings)
+        notifications.onResponse = { [weak self] response in
+            self?.handle(response)
+        }
     }
+
+    /// Brings the main window back, for actions that come from outside it (notifications, the
+    /// menu bar). Supplied by the window's root view, since only views can open windows.
+    var openMainWindow: (() -> Void)?
 
     /// Work that must happen once, after the first window exists.
     func performLaunchSetup() async {
@@ -77,7 +86,32 @@ final class AppModel {
         if !queue.interrupted.isEmpty { selectedSection = .queue }
         history.updateEntries { $0.removeSecrets() }
         settings.applyAppearance()
+        activityMonitor.start()
         await toolchain.refresh()
+    }
+
+    // MARK: - Notifications
+
+    private func handle(_ response: NotificationService.Response) {
+        switch response {
+        case .reveal(let files):
+            FinderIntegration.reveal(files)
+        case .retry(let id):
+            if let item = queue.item(withID: id), item.canRetry {
+                queue.retry(item)
+            }
+            show(.queue)
+        case .showQueue:
+            show(.queue)
+        case .showHistory:
+            show(.history)
+        }
+    }
+
+    func show(_ section: AppSection) {
+        selectedSection = section
+        openMainWindow?()
+        NSApp.activate()
     }
 
     // MARK: - Clipboard watching
@@ -107,9 +141,7 @@ final class AppModel {
 
     func startDownload() {
         selectedSection = .download
-        if composer.startDownload(), queue.isBusy {
-            selectedSection = .queue
-        }
+        composer.startDownload()
     }
 
     func analyzeCurrentURL() {
@@ -117,11 +149,21 @@ final class AppModel {
         composer.analyze()
     }
 
-    func resume(_ saved: DownloadQueue.Interrupted) {
+    /// Whether a saved download can go straight back into the queue: its folder is still
+    /// there and writable, and it had no credentials that were left out when it was saved.
+    private func isOutputFolderUsable(for saved: DownloadQueue.Interrupted) -> Bool {
         var directory: ObjCBool = false
-        let path = saved.options.outputDirectory.path
-        let usable = FileManager.default.fileExists(atPath: path, isDirectory: &directory)
+        let path = saved.options.outputDirectory.path(percentEncoded: false)
+        return FileManager.default.fileExists(atPath: path, isDirectory: &directory)
             && directory.boolValue && FileManager.default.isWritableFile(atPath: path)
+    }
+
+    private func canResumeDirectly(_ saved: DownloadQueue.Interrupted) -> Bool {
+        saved.removedSecrets.isEmpty && isOutputFolderUsable(for: saved)
+    }
+
+    func resume(_ saved: DownloadQueue.Interrupted) {
+        let usable = isOutputFolderUsable(for: saved)
         if usable && saved.removedSecrets.isEmpty {
             guard toolchain.isReady(for: saved.options.backend) else {
                 queue.notice = "Set up \(saved.options.backend.displayName) in Settings before resuming this download."
@@ -142,6 +184,21 @@ final class AppModel {
         }
     }
 
+    /// Resumes, in their saved order, every unfinished download that needs nothing from the
+    /// user. The rest stay listed, each with its own Resume button.
+    func resumeAllInterrupted() {
+        let ready = queue.interrupted.filter { canResumeDirectly($0) && toolchain.isReady(for: $0.options.backend) }
+        for saved in ready {
+            queue.enqueue(url: saved.url, options: saved.options, resuming: saved.id)
+        }
+        let remaining = queue.interrupted.count
+        if remaining > 0 {
+            queue.notice = remaining == 1
+                ? "One download needs a folder, a credential or a tool before it can resume."
+                : "\(remaining) downloads need a folder, a credential or a tool before they can resume."
+        }
+    }
+
     func chooseOutputDirectory() {
         composer.chooseOutputDirectory()
     }
@@ -157,6 +214,7 @@ final class AppModel {
 
     /// Called from `applicationWillTerminate` so nothing pending is lost.
     func prepareForTermination() {
+        activityMonitor.stop()
         queue.prepareForTermination()
         history.flush()
     }
